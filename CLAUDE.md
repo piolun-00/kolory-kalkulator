@@ -1,0 +1,29 @@
+# CLAUDE.md — kalkulator poligraficzny KHOREI
+
+Właściciel: Radek, studio KHOREI. Narzędzie dla drukarni Kolory na licencji Radka (LICENSE).
+Pisze po polsku, ekspert od designu, nie programuje — Claude dobiera technikę i tłumaczy „dlaczego”.
+UI i komentarze po polsku. Styl i tokeny 1:1 z edytora brandmanuala (piolun-00/brand-manual, editor/editor.css).
+
+## Architektura
+- Statyczna strona bez builda: ES modules, Preact + htm (import map w index.html), jak edytor brandmanuala.
+- `engine/` — logika bez interfejsu (do wywołania później przez agenta / CRM):
+  - `config.js` — maszyny (PX300 wg producenta), formaty arkuszy, cenniki z arkusza „WunderWaffe”.
+  - `cut.js` — cięcie gilotynowe (DP po pozycjach normalnych), reguły włókna (produkt + PX300), stacje
+    (kaszerowanie 500×300, sztanca B2, sito/tłoczenie montaż 1–4), `planuj()` → scenariusze, `wariantReczny()` → wariant pracownika z ostrzeżeniami.
+  - `pricing.js` — wycena 1:1 z arkusza (komórki źródłowe w komentarzach); miejsca „DO DECYZJI” liczone jak w arkuszu.
+    Wyjątki od arkusza: użytki/arkusze z silnika (nie ręcznie, nie „B1 = 4 SRA3”); cięcie = linie × stosy × stawka (min. 30 zł).
+- `app/app.js` — 3 kolumny: nawigacja · formularz · podgląd (rzut cięcia SVG, matryca decyzji, wycena, karta cięcia).
+- Dane: localStorage (`kk.zlecenie`, `kk.maszyny`, `kk.cennik`). Wspólna baza i konta dla Kolorów — następny etap.
+- Pasek nowej wersji jak w brandmanualu (`version.json`, tylko gdy wersja na serwerze nowsza).
+
+## Zasady
+- Repo: piolun-00/kolory-kalkulator. Push na main → testy → GitHub Pages; `scripts/release.sh` tylko lokalnie.
+- Testy: `node --test tests/*.test.mjs`. Nowa reguła / formuła = nowy przypadek z odwołaniem do komórki arkusza.
+- Żadnych liczb na sztywno w silniku — wszystko przez config (edytowalne w „Maszyny” / „Cenniki”).
+- Commity kończą się linią Co-Authored-By i linkiem sesji.
+
+## Otwarte (do decyzji Radka / Kolorów)
+- Stawka za linię cięcia (robocza 0,50 zł), wysokość stosu gilotyny (robocza 80 mm), próg włókna PX300 (135 g).
+- Błędy/anomalie arkusza zachowane do decyzji: sztanca 1000→1001, letterpress „kolejny kolor” od ustawień,
+  rożkowanie i szycie od nakładu na wzór, sito na formatce cyfrowej (przelot na formatkę), etykiety w Offset.
+- Kolejne moduły: Broszury, Wielki format, Offset, zlecenia i karta produkcyjna, ręczne cięcie na rysunku.

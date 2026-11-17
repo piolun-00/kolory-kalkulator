@@ -1,0 +1,56 @@
+KALKULATOR POLIGRAFICZNY KHOREI — wyceny, impozycja i zlecenia dla drukarni
+Copyright © 2026 Radosław Prośniak (KHOREI). Wszelkie prawa zastrzeżone.
+
+
+1. PRZEDMIOT
+
+Kod źródłowy — HTML, CSS i JavaScript interfejsu oraz silnika cięcia
+i wycen — stanowi utwór w rozumieniu ustawy o prawie autorskim i prawach
+pokrewnych. Dotyczy to w szczególności autorskich rozwiązań: algorytmu
+impozycji i cięcia gilotynowego z regułami włókna i maszyn, matrycy
+decyzji (warianty cięcia z wyceną), karty cięcia oraz projektu interfejsu.
+
+
+2. LICENCJOBIORCA
+
+Autor udziela drukarni Kolory (dalej: Licencjobiorca) niewyłącznej,
+nieprzenoszalnej licencji na korzystanie z kalkulatora wyłącznie do
+wewnętrznych wycen i obsługi zleceń, przez pracowników Licencjobiorcy.
+Szczegółowy zakres, czas i wynagrodzenie określa odrębna umowa.
+Licencjobiorca odpowiada za dane, ceny i wyceny wprowadzane do
+kalkulatora i przekazywane klientom.
+
+Licencja NIE obejmuje prawa do:
+  — powielania i zwielokrotniania kodu w całości ani w części,
+  — modyfikowania kodu i tworzenia opracowań,
+  — udostępniania, odsprzedawania, wynajmowania i użyczania osobom trzecim,
+  — wykorzystywania kodu lub jego fragmentów w innych projektach,
+  — usuwania lub zmieniania niniejszej noty i not w plikach.
+
+
+3. PUBLICZNA DOSTĘPNOŚĆ NIE JEST LICENCJĄ
+
+Jeżeli repozytorium jest publiczne, to wyłącznie z przyczyn technicznych
+(hosting). Możliwość obejrzenia kodu nie oznacza zgody na jego użycie.
+
+
+4. SKŁADNIKI OSÓB TRZECICH
+
+Preact (MIT) i htm (Apache-2.0) — pełne teksty licencji w katalogu
+licenses/. Zastrzeżenia z niniejszego pliku tych składników nie obejmują.
+
+
+5. NARZĘDZIA AUTOMATYCZNE I MODELE JĘZYKOWE
+
+Autor zastrzega eksplorację tekstów i danych w rozumieniu art. 4 ust. 3
+dyrektywy 2019/790 (DSM). Kod nie jest materiałem do trenowania modeli,
+do zbiorów danych ani do generowania utworów zależnych. Zastrzeżenie jest
+wyrażone maszynowo: robots.txt, meta tdm-reservation w index.html,
+komentarze nagłówkowe plików. Modyfikacje kodu wprowadza wyłącznie autor
+lub osoba działająca na jego wyraźne polecenie.
+
+
+6. AUTOR I KONTAKT
+
+Autorem kodu jest Radosław Prośniak, KHOREI. W sprawie licencji — kontakt
+z autorem.
