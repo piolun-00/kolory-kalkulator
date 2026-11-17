@@ -158,3 +158,32 @@ test("Ręczna siatka większa niż formatka → ostrzeżenie", () => {
   const w = wariantFormatki(z, MASZYNY, planuj(z, MASZYNY), { w: 330, h: 488, wlokno: "krotkie", nx: 4, ny: 9 });
   assert.ok(w.ostrzezenia.some((o) => o.includes("nie mieści się w formatce")));
 });
+
+test("Rozcinka i margines ze zlecenia: SRA3+ SG, 90×50 wzdłuż dłuższego", () => {
+  const base = { uzytek: { w: 90, h: 50, wlokno: "dlugi" }, technologie: { cyfra: { on: true, kolor: "4+0" } } };
+  const f = { w: 330, h: 488, wlokno: "krotkie" };
+  const run = (over) => { const z = zl({ ...base, ...over }); return wariantFormatki(z, MASZYNY, planuj(z, MASZYNY), f); };
+  // domyślnie 3 / 7: 330−14 = 316 → 3 × 90; 488−14 = 474 → 9 × 50 (9·50 + 8·3 = 474)
+  assert.equal(run({ rozcinka: 3, margines: 7 }).formatka.uzytkow, 27);
+  // margines 10: 468 → 8 rzędów
+  assert.equal(run({ rozcinka: 3, margines: 10 }).formatka.uzytkow, 24);
+  // rozcinka 0, margines 7: 474 / 50 = 9 rzędów; cięcia: 1 na przerwę → (3−1) + (9−1) + 4 = 14
+  const r0 = run({ rozcinka: 0, margines: 7 });
+  assert.equal(r0.formatka.uzytkow, 27);
+  assert.equal(r0.ciecia.formatka, 14);
+  assert.equal(run({ rozcinka: 3, margines: 7 }).ciecia.formatka, 24); // 2·2 + 2·8 + 4
+});
+
+test("Rozcinka zmienia wymiar formatki w sugestiach (sito, montaż 1: 104 × 64 → 100 × 60 przy marginesie 5)", () => {
+  const z = zl({ uzytek: { w: 90, h: 50, wlokno: "dlugi" }, technologie: { sito: { on: true } }, montaz: 1, rozcinka: 3, margines: 5 });
+  const s = planuj(z, MASZYNY).scenariusze[0];
+  assert.deepEqual([Math.max(s.formatka.w, s.formatka.h), Math.min(s.formatka.w, s.formatka.h)], [100, 60]);
+});
+
+test("Wskazana formatka liczy cięcia arkusza tak samo jak ta sama sugestia", () => {
+  const z = zl({ uzytek: { w: 90, h: 50, wlokno: "dlugi" }, technologie: { cyfra: { on: true, kolor: "4+0" } }, rozcinka: 3, margines: 7 });
+  const plan = planuj(z, MASZYNY);
+  const w = wariantFormatki(z, MASZYNY, plan, { w: 330, h: 488, wlokno: "krotkie" });
+  const s = plan.scenariusze.find((x) => x.formatka.standard);
+  assert.equal(w.ciecia.arkusz, s.ciecia.arkusz);
+});

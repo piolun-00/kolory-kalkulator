@@ -40,6 +40,8 @@ export const zlecenieDomyslne = () => ({
   papier2: { nazwa: "", cenaDostawcy: 0, cenaLicze: 0 },
   pozwolBypass: false,
   wysylka: false,
+  rozcinka: WYCINKA,   // odstęp między użytkami (spady + rzaz), mm
+  margines: 7,         // margines formatki na każdym boku (niedruk + znaczniki cięcia), mm
   // Formatka do druku: wskazana w wycenie (jak w drukarni) albo dobrana przez kalkulator
   formatka: { tryb: "wybrana", format: "sra3+", w: 330, h: 488, wlokno: "krotkie", siatka: false, nx: 0, ny: 0, urot: "auto" },
   technologie: {
@@ -156,7 +158,7 @@ function Zlecenie({ z, up, M, C }) {
         <${Num} label="Wzory" value=${z.wzory} min=${1} onChange=${(v) => up((x) => { x.wzory = Math.max(1, Math.round(v)); })} />
         <${Num} label="Zwyżka" unit="ark." value=${z.zwyzkaArkuszy} onChange=${(v) => up((x) => { x.zwyzkaArkuszy = Math.round(v); })} />
       </div>
-      <p class="note">Wycinka między użytkami ${WYCINKA} mm (spady + rzaz). Zwyżka w arkuszach bazowych, jak w arkuszu kalkulacyjnym.</p>
+      <p class="note">Zwyżka w arkuszach bazowych, jak w arkuszu kalkulacyjnym.</p>
     </${Group}>
 
     <${Group} id="papier" title="Papier" open=${open.papier} toggle=${tg("papier")}
@@ -206,7 +208,13 @@ function Zlecenie({ z, up, M, C }) {
           <${Num} label="W pionie" value=${F.ny} hint="0 = najwięcej" onChange=${(v) => setF({ ny: Math.round(v) })} />
           <${Sel} label="Użytek" value=${String(F.urot)} options=${[["auto", "Wg włókna"], ["false", `${mm(z.uzytek.w)} × ${mm(z.uzytek.h)}`], ["true", "Obrócony"]]} onChange=${(v) => setF({ urot: v === "auto" ? "auto" : v === "true" })} />
         </div>`}
-        <div class="group__sub" style="margin-top:0">Technologia</div>`}
+        `}
+      <div class="grid2">
+        <${Num} label="Rozcinka między użytkami" unit="mm" value=${z.rozcinka} onChange=${(v) => up((x) => { x.rozcinka = v; })}
+          hint=${z.rozcinka > 0 ? "Spady + rzaz; tniemy dwa razy na przerwę." : "Użytki stykają się — jedno wspólne cięcie."} />
+        <${Num} label="Margines formatki" unit="mm" value=${z.margines} onChange=${(v) => up((x) => { x.margines = v; })} hint="Na każdym boku: niedruk + znaczniki." />
+      </div>
+      <div class="group__sub" style="margin-top:0">Technologia</div>
       <${Tech} label="Druk cyfrowy" note=${M.cyfra.nazwa} t=${T.cyfra} set=${setT("cyfra")}>
         <${Sel} label="Kolorystyka" value=${T.cyfra.kolor} options=${Object.keys(C.cyfra.kolory).map((k) => [k, k])} onChange=${(v) => setT("cyfra")({ ...T.cyfra, kolor: v })} />
         <${Check} label=${`Dopuść bypass (arkusz do ${M.cyfra.dlugoscMaxBypass} mm, wolniej, ręcznie)`} checked=${z.pozwolBypass} onChange=${(v) => up((x) => { x.pozwolBypass = v; })} />
@@ -290,10 +298,11 @@ function ArkuszSVG({ plan, s, M }) {
       const x = ob + p.x, y = ob + p.y;
       // w układzie formatki: rot = obrócona o 90° → kolumny/rzędy użytków zamieniają się
       const nx = p.rot ? f.ny : f.nx, ny = p.rot ? f.nx : f.ny, uw = p.rot ? f.uh : f.uw, uh = p.rot ? f.uw : f.uh;
-      const m = (p.w - nx * uw - (nx - 1) * WYCINKA) / 2;
+      const G = f.gap;
+      const m = (p.w - nx * uw - (nx - 1) * G) / 2;
       const items = [];
       if (showItems && !f.netto) for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++)
-        items.push(html`<rect x=${x + m + i * (uw + WYCINKA)} y=${y + (p.h - ny * uh - (ny - 1) * WYCINKA) / 2 + j * (uh + WYCINKA)} width=${uw} height=${uh} fill="none" stroke="#111" stroke-opacity=".35" vector-effect="non-scaling-stroke" />`);
+        items.push(html`<rect x=${x + m + i * (uw + G)} y=${y + (p.h - ny * uh - (ny - 1) * G) / 2 + j * (uh + G)} width=${uw} height=${uh} fill="none" stroke="#111" stroke-opacity=".35" vector-effect="non-scaling-stroke" />`);
       return html`<g><rect x=${x} y=${y} width=${p.w} height=${p.h} fill=${p.rot ? "#e9e9e4" : "#fff"} stroke="#111" vector-effect="non-scaling-stroke" />${items}</g>`;
     })}
     <${GrainLines} w=${A.w} h=${A.h} axis=${A.grain} />
@@ -301,10 +310,11 @@ function ArkuszSVG({ plan, s, M }) {
 }
 function FormatkaSVG({ s, grainAxis }) {
   const f = s.formatka;
-  const m = (f.w - f.nx * f.uw - (f.nx - 1) * WYCINKA) / 2, my = (f.h - f.ny * f.uh - (f.ny - 1) * WYCINKA) / 2;
+  const G = f.gap;
+  const m = (f.w - f.nx * f.uw - (f.nx - 1) * G) / 2, my = (f.h - f.ny * f.uh - (f.ny - 1) * G) / 2;
   const items = [];
   for (let i = 0; i < f.nx; i++) for (let j = 0; j < f.ny; j++)
-    items.push(html`<rect x=${m + i * (f.uw + WYCINKA)} y=${my + j * (f.uh + WYCINKA)} width=${f.uw} height=${f.uh} fill="#f0f0ec" stroke="#111" vector-effect="non-scaling-stroke" />`);
+    items.push(html`<rect x=${m + i * (f.uw + G)} y=${my + j * (f.uh + G)} width=${f.uw} height=${f.uh} fill="#f0f0ec" stroke="#111" vector-effect="non-scaling-stroke" />`);
   return html`<svg viewBox=${`-2 -2 ${f.w + 4} ${f.h + 4}`} role="img" aria-label="Rzut formatki">
     <rect x="0" y="0" width=${f.w} height=${f.h} fill="#fff" stroke="#111" vector-effect="non-scaling-stroke" />
     ${!f.netto && html`<rect x=${m} y=${my} width=${f.w - 2 * m} height=${f.h - 2 * my} fill="none" stroke="#77776f" stroke-dasharray="4 3" vector-effect="non-scaling-stroke" />`}
@@ -335,7 +345,7 @@ function Karta({ z, plan, s, M }) {
   }
   if (T.letterpress.on) kroki.push([`Letterpress`, `${s.wydrukowane} odb.`]);
   if (T.sztancowanie.on) kroki.push([`Sztancowanie formatek`, `${s.formatek.zArkuszy} uderz.`]);
-  if (!f.netto) kroki.push([`Formatka → użytki: siatka ${f.nx} × ${f.ny}, odciąć margines, cięcie przez środek wycinki ${WYCINKA} mm`, `${s.ciecia.formatka} cięć / stos`]);
+  if (!f.netto) kroki.push([`Formatka → użytki: siatka ${f.nx} × ${f.ny}, ${f.margin > 0 ? `odciąć margines ${mm(f.margin)} mm, ` : ""}${f.gap > 0 ? `cięcie przez rozcinkę ${mm(f.gap)} mm (2 cięcia na przerwę)` : "użytki bez rozcinki — jedno cięcie na styku"}`, `${s.ciecia.formatka} cięć / stos`]);
   kroki.push([`Gotowe użytki ${mm(z.uzytek.w)} × ${mm(z.uzytek.h)} mm`, `${s.wydrukowane} szt. (zamówione ${z.naklad})`]);
   return html`<ol class="steps">${kroki.map(([t, n], i) => html`<li><span>${i + 1}</span><span>${t}</span><span>${n}</span></li>`)}</ol>`;
 }
@@ -378,9 +388,9 @@ function Kompromis({ s, cmp, przyjmij }) {
 }
 
 function Podglad({ z, up, M, C }) {
-  const plan = useMemo(() => planuj(z, M, WYCINKA), [z, M]);
+  const plan = useMemo(() => planuj(z, M), [z, M]);
   const F = z.formatka;
-  const wyb = useMemo(() => (F.tryb === "wybrana" ? wariantFormatki(z, M, plan, { ...F, nx: F.siatka ? F.nx : 0, ny: F.siatka ? F.ny : 0, urot: F.siatka ? F.urot : "auto" }, WYCINKA) : null), [z, M, plan]);
+  const wyb = useMemo(() => (F.tryb === "wybrana" ? wariantFormatki(z, M, plan, { ...F, nx: F.siatka ? F.nx : 0, ny: F.siatka ? F.ny : 0, urot: F.siatka ? F.urot : "auto" }) : null), [z, M, plan]);
   const cmp = useMemo(() => porownaj(z, plan, C, wyb), [z, plan, C, wyb]);
   const [sel, setSel] = useState(null);
   const [all, setAll] = useState(false);

@@ -16,6 +16,8 @@ UI i komentarze po polsku. Styl i tokeny 1:1 z edytora brandmanuala (piolun-00/b
   - `pricing.js` — wycena 1:1 z arkusza (komórki źródłowe w komentarzach); miejsca „DO DECYZJI” liczone jak w arkuszu.
     Wyjątki od arkusza: użytki/arkusze z silnika (nie ręcznie, nie „B1 = 4 SRA3”); cięcie = linie × stosy × stawka (min. 30 zł).
 - `app/app.js` — 3 kolumny: nawigacja · formularz · podgląd (rzut cięcia SVG, matryca decyzji, wycena, karta cięcia).
+- Rozcinka (`z.rozcinka`, domyślnie 3 mm) i margines formatki (`z.margines`, domyślnie 7 mm) ustawiane w zleceniu
+  (sekcja Druk); rozcinka 0 = jedno wspólne cięcie zamiast dwóch na przerwę.
 - Dane: localStorage (`kk.zlecenie`, `kk.maszyny`, `kk.cennik`). Wspólna baza i konta dla Kolorów — następny etap.
 - Pasek nowej wersji jak w brandmanualu (`version.json`, tylko gdy wersja na serwerze nowsza).
 

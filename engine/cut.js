@@ -135,7 +135,9 @@ export function gilotyna(W, H, pieces) {
 // ===== Planowanie: od zlecenia do listy scenariuszy =====
 // z — zlecenie (patrz app/state.js → zlecenieDomyslne), M — maszyny (config.MASZYNY).
 // Zwraca listę scenariuszy z pełną drogą cięcia i metrykami; posortowaną później przez wycenę.
-export function planuj(z, M, gap = 3) {
+export function planuj(z, M, gapDomyslny = 3) {
+  // Rozcinka i margines ustawiane w zleceniu (domyślnie 3 i 7 mm); brak w zleceniu → wartości maszyn
+  const gap = Number.isFinite(z.rozcinka) ? z.rozcinka : gapDomyslny;
   const arkusz = { w: z.arkusz.a, h: z.arkusz.b, grain: z.arkusz.wlokno === "dlugie" ? (z.arkusz.b >= z.arkusz.a ? "y" : "x") : (z.arkusz.b >= z.arkusz.a ? "x" : "y") };
   const ob = M.gilotyna.obciecieArkusza;
   const uzW = arkusz.w - 2 * ob, uzH = arkusz.h - 2 * ob; // pole użyteczne arkusza po obcięciu krawędzi
@@ -153,7 +155,8 @@ export function planuj(z, M, gap = 3) {
   // Bez cyfry formatka służy situ / tłoczeniu — montaż od 1 do 4 użytków (arkusz: „jedynki, dwójki, trójki, czwórki”)
   const analog = !maCyfre && (T.sito?.on || T.tloczenie?.on || T.letterpress?.on);
   const maxUzytkow = analog ? Math.min(...[T.sito?.on && M.sito.montazMax, T.tloczenie?.on && M.tloczenie.montazMax, T.letterpress?.on && M.letterpress.montazMax].filter(Boolean)) : Infinity;
-  const margin = maCyfre ? M.cyfra.margines : analog ? M.sito.margines : 0;
+  const marginStacji = maCyfre ? M.cyfra.margines : analog ? M.sito.margines : 0;
+  const margin = !maCyfre && !analog ? 0 : Number.isFinite(z.margines) ? z.margines : marginStacji;
 
   // Kandydaci na formatkę: siatki nx × ny użytków, w obu orientacjach użytku.
   const kandydaci = [];
@@ -178,7 +181,7 @@ export function planuj(z, M, gap = 3) {
   }
 
   const wyniki = [];
-  ctx = { arkusz, uzW, uzH, stacje, maCyfre, gram, margin };
+  ctx = { arkusz, uzW, uzH, stacje, maCyfre, gram, margin, gap };
   for (const k of kandydaci) {
     if (!stacje.every((s) => miesciSie(k.fw, k.fh, s))) continue;
     // Dwie orientacje formatki na arkuszu: rot=false (fw wzdłuż X arkusza), rot=true (obrócona o 90°).
@@ -198,7 +201,7 @@ export function planuj(z, M, gap = 3) {
     if (!dozw.length) continue;
     const g = gilotyna(uzW, uzH, dozw);
     if (!g.count) continue;
-    wyniki.push(metryki(z, M, arkusz, k, g, cyfraInfo));
+    wyniki.push(metryki(z, M, arkusz, { ...k, gap, margin: k.netto ? 0 : margin }, g, cyfraInfo));
   }
   // Duplikaty (ta sama formatka z dwóch dróg) i scenariusze zdominowane wypadają
   const uniq = new Map();
@@ -231,8 +234,10 @@ function metryki(z, M, arkusz, k, g, cyfraInfo) {
   // Cięcia: arkusz → formatki (+4 obcięcia krawędzi) i formatka → użytki (siatka + obcięcie marginesów),
   // na stosie — liczymy operacje na jeden stos, nie na arkusz.
   const cieciaArkusz = g.ciec + 4;
-  // (pasy przekładane na jeden stos — tak pracuje introligatornia; wycinka = 2 cięcia).
-  const cieciaFormatka = k.netto ? 0 : 2 * (k.nx - 1) + 2 * (k.ny - 1) + 4;
+  // (pasy przekładane na jeden stos — tak pracuje introligatornia). Rozcinka > 0 = 2 cięcia na przerwę, 0 = jedno wspólne;
+  // margines > 0 = 4 cięcia obcinające brzegi formatki.
+  const naPrzerwe = (k.gap ?? 3) > 0 ? 2 : 1;
+  const cieciaFormatka = k.netto ? 0 : naPrzerwe * (k.nx - 1) + naPrzerwe * (k.ny - 1) + ((k.margin ?? 7) > 0 ? 4 : 0);
   // Stosy: ile razy trzeba powtórzyć każde cięcie, bo cały nakład nie mieści się pod nożem naraz.
   const grub = (z.papier.mikrony || 300) / 1000;
   const kasz = z.technologie.kaszerowanie?.on ? 2 : 1;
@@ -241,7 +246,7 @@ function metryki(z, M, arkusz, k, g, cyfraInfo) {
   const stosyFormatka = Math.max(1, Math.ceil((formatek * grub * kasz) / wys));
   return {
     id: `${k.fw}x${k.fh}-${k.nx}x${k.ny}${k.urot ? "r" : ""}${k.standard ? "-std" : ""}`,
-    formatka: { w: k.fw, h: k.fh, nx: k.nx, ny: k.ny, uw: k.uw, uh: k.uh, uzytkow: upf, standard: k.standard, netto: !!k.netto },
+    formatka: { w: k.fw, h: k.fh, nx: k.nx, ny: k.ny, uw: k.uw, uh: k.uh, uzytkow: upf, standard: k.standard, netto: !!k.netto, gap: k.gap ?? 3, margin: k.margin ?? 0 },
     cyfra: cyfraInfo,
     uklad: g.placements,
     formatek: { naArkusz, potrzeba: formatekPotrzeba, zArkuszy: formatek },
@@ -258,8 +263,10 @@ function metryki(z, M, arkusz, k, g, cyfraInfo) {
 // Z tego wynika reszta: jak położyć formatki na arkuszu bazowym, żeby dostać to włókno, i ile użytków zmieści się
 // na formatce przy wymogu włókna produktu. Reguły maszyn i stacji nie odrzucają wariantu — dają ostrzeżenia.
 // f = { w, h, wlokno: "dlugie" | "krotkie", nx, ny (0 = najwięcej), urot: "auto" | true | false }
-export function wariantFormatki(z, M, plan, f, gap = 3) {
-  const { arkusz, uzW, uzH, stacje, maCyfre, gram, margin } = plan.ctx;
+export function wariantFormatki(z, M, plan, f) {
+  const { arkusz, uzW, uzH, stacje, maCyfre, gram, gap } = plan.ctx;
+  // przy wskazanej formatce margines obowiązuje zawsze (także bez cyfry)
+  const margin = Number.isFinite(z.margines) ? z.margines : plan.ctx.margin || M.cyfra.margines;
   const fw = f.w, fh = f.h, ostrz = [];
   // Arkusz bazowy = formatka (np. kupione SRA3): bez cięcia arkusza, włókno takie jak arkusza.
   const toSamo = (Math.abs(arkusz.w - fw) < 0.5 && Math.abs(arkusz.h - fh) < 0.5) || (Math.abs(arkusz.w - fh) < 0.5 && Math.abs(arkusz.h - fw) < 0.5);
@@ -276,7 +283,6 @@ export function wariantFormatki(z, M, plan, f, gap = 3) {
     const rots = !osDlugiego(fw, fh) ? [false, true] : [arkusz.grain === g ? false : true];
     placement = gilotyna(uzW, uzH, rots.map((rot) => ({ w: rot ? fh : fw, h: rot ? fw : fh, rot })));
     if (!placement.count) return { pusty: true, ostrzezenia: [`Formatka ${fw} × ${fh} mm z włóknem ${f.wlokno === "krotkie" ? "krótkim" : "długim"} nie mieści się na arkuszu ${arkusz.w} × ${arkusz.h} (po obcięciu krawędzi). Spróbuj drugiego kierunku włókna.`] };
-    placement.ciec += 4;
   }
   // Użytki na formatce: orientacja zgodna z włóknem produktu, najwięcej sztuk; ręczna siatka nadpisuje
   const avW = fw - 2 * margin, avH = fh - 2 * margin;
@@ -294,7 +300,7 @@ export function wariantFormatki(z, M, plan, f, gap = 3) {
   if (f.nx > 0 || f.ny > 0) {
     const rx = f.nx > 0 ? Math.round(f.nx) : nx, ry = f.ny > 0 ? Math.round(f.ny) : ny;
     const need = wymiarFormatki(rx, ry, o.uw, o.uh, gap, margin);
-    if (need.w > fw + EPS || need.h > fh + EPS) ostrz.push(`Siatka ${rx} × ${ry} nie mieści się w formatce — potrzeba ${need.w} × ${need.h} mm (z marginesem ${margin} mm i wycinką ${gap} mm).`);
+    if (need.w > fw + EPS || need.h > fh + EPS) ostrz.push(`Siatka ${rx} × ${ry} nie mieści się w formatce — potrzeba ${need.w} × ${need.h} mm (z marginesem ${margin} mm i rozcinką ${gap} mm).`);
     nx = rx; ny = ry;
   }
   if (!nx || !ny) return { pusty: true, ostrzezenia: [...ostrz, `Użytek ${z.uzytek.w} × ${z.uzytek.h} mm nie mieści się na formatce ${fw} × ${fh} mm z marginesem ${margin} mm.`] };
@@ -304,7 +310,7 @@ export function wariantFormatki(z, M, plan, f, gap = 3) {
   }
   for (const st of stacje) if (!miesciSie(fw, fh, st)) ostrz.push(`${st.nazwa}: formatka większa niż ${st.maxA} × ${st.maxB} mm.`);
   const cInfo = maCyfre ? (() => { const a = cyfraPrzyjmie(fw, fh, g, 0, M.cyfra, true); return a.ok ? a : null; })() : null;
-  const k = { uw: o.uw, uh: o.uh, urot: o.urot, nx, ny, fw, fh, standard: false, wybrana: true };
+  const k = { uw: o.uw, uh: o.uh, urot: o.urot, nx, ny, fw, fh, standard: false, wybrana: true, gap, margin };
   const m = metryki(z, M, arkusz, k, placement, cInfo);
   if (toSamo) m.ciecia.arkusz = 0;
   m.id = "wybrana"; m.wybrana = true; m.ostrzezenia = ostrz;
