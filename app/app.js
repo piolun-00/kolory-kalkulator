@@ -123,7 +123,7 @@ function Tech({ label, t, set, note, children }) {
 
 // ===== Formularz zlecenia =====
 function Zlecenie({ z, up, M, C }) {
-  const [open, setOpen] = useState(store.get("kk.groups", { produkt: true, papier: true, druk: true, wyk: false }));
+  const [open, setOpen] = useState(() => ({ produkt: true, drukowy: true, papier: true, druk: true, wyk: false, ...store.get("kk.groups", {}) }));
   const tg = (k) => () => { const n = { ...open, [k]: !open[k] }; setOpen(n); store.set("kk.groups", n); };
   const T = z.technologie;
   const setT = (k) => (v) => up((x) => { x.technologie[k] = v; });
@@ -134,48 +134,71 @@ function Zlecenie({ z, up, M, C }) {
   const ciezki = z.papier.gram >= M.cyfra.progWloknaGram;
   const F = z.formatka, setF = (patch) => up((x) => { Object.assign(x.formatka, patch); });
 
+  // Kolejność jak w pracy drukarni: 1 użytek → 2 arkusz, z którego drukuję → 3 arkusz, który kupuję i tnę → technologia
   return html`<div class="panel__inner">
     <div>
       <h1 class="h">Wycena</h1>
-      <p class="note">Wpisz produkt, papier i technologię — kalkulator sam dobierze cięcie arkusza i pokaże warianty.</p>
+      <p class="note">Użytek → arkusz, z którego drukujesz → arkusz, który kupujesz i tniesz. Kalkulator liczy resztę i pokazuje warianty.</p>
     </div>
     <div class="grid2">
       <${Txt} label="Zlecenie" value=${z.nazwa} placeholder="np. wizytówki" onChange=${(v) => up((x) => { x.nazwa = v; })} />
       <${Txt} label="Klient" value=${z.klient} placeholder="—" onChange=${(v) => up((x) => { x.klient = v; })} />
     </div>
 
-    <${Group} id="produkt" title="Produkt" open=${open.produkt} toggle=${tg("produkt")}
-      summary=${`${mm(z.uzytek.w)} × ${mm(z.uzytek.h)} mm · ${z.naklad} szt.${z.wzory > 1 ? ` · ${z.wzory} wzory` : ""}`}>
-      <div class="grid2">
+    <${Group} id="produkt" title="1  Użytek" open=${open.produkt} toggle=${tg("produkt")}
+      summary=${`${mm(z.uzytek.w)} × ${mm(z.uzytek.h)} mm · spady ${mm(z.rozcinka)} · ${z.naklad} szt.${z.wzory > 1 ? ` · ${z.wzory} wzory` : ""}`}>
+      <div class="grid3">
         <${Num} label="Szerokość netto" unit="mm" value=${z.uzytek.w} onChange=${(v) => up((x) => { x.uzytek.w = v; })} />
         <${Num} label="Wysokość netto" unit="mm" value=${z.uzytek.h} onChange=${(v) => up((x) => { x.uzytek.h = v; })} />
+        <${Num} label="Spady" unit="mm" value=${z.rozcinka} onChange=${(v) => up((x) => { x.rozcinka = v; })} />
       </div>
+      <p class="f__hint">Spady = odstęp między krawędziami netto sąsiednich użytków (jak w arkuszu: 3 mm, po 1,5 mm na stronę).${z.rozcinka > 0 ? " Tniemy dwa razy na przerwę." : " Użytki stykają się — jedno wspólne cięcie."}</p>
       <${Seg} label="Włókno w gotowym produkcie" value=${z.uzytek.wlokno} onChange=${(v) => up((x) => { x.uzytek.wlokno = v; })}
         options=${[["dlugi", "Wzdłuż dłuższego"], ["krotki", "Wzdłuż krótszego"], ["dowolne", "Dowolnie"]]}
         hint=${z.uzytek.wlokno === "dowolne" ? "Kalkulator może obracać użytki — zwykle więcej sztuk z arkusza." : "Np. wizytówki: włókno wzdłuż dłuższego boku — sztywniejsze, nie wyginają się."} />
-      <div class="grid3">
+      <div class="grid2">
         <${Num} label="Nakład" unit="szt." value=${z.naklad} min=${1} onChange=${(v) => up((x) => { x.naklad = Math.round(v); })} />
         <${Num} label="Wzory" value=${z.wzory} min=${1} onChange=${(v) => up((x) => { x.wzory = Math.max(1, Math.round(v)); })} />
-        <${Num} label="Zwyżka" unit="ark." value=${z.zwyzkaArkuszy} onChange=${(v) => up((x) => { x.zwyzkaArkuszy = Math.round(v); })} />
       </div>
-      <p class="note">Zwyżka w arkuszach bazowych, jak w arkuszu kalkulacyjnym.</p>
     </${Group}>
 
-    <${Group} id="papier" title="Papier" open=${open.papier} toggle=${tg("papier")}
+    <${Group} id="drukowy" title="2  Arkusz, z którego drukuję" open=${open.drukowy} toggle=${tg("drukowy")}
+      summary=${F.tryb === "wybrana" ? `${mm(F.w)} × ${mm(F.h)} · ${F.wlokno === "dlugie" ? "LG" : "SG"} · margines ${mm(z.margines)}` : "dobierany przez kalkulator"}>
+      <${Seg} value=${F.tryb} options=${[["wybrana", "Wskazuję format"], ["auto", "Dobierz za mnie"]]} onChange=${(v) => setF({ tryb: v })}
+        hint=${F.tryb === "auto" ? "Kalkulator sam wybiera wymiar arkusza drukowego i jego włókno — najtańszy wariant." : "Format, który wchodzi do maszyny (formatka), np. SRA3+."} />
+      ${F.tryb === "wybrana" && html`
+        <${Sel} label="Format" value=${F.format} options=${FORMATKI.map(([v, l]) => [v, l])} onChange=${(v) => { const f = FORMATKI.find((x) => x[0] === v); setF(v === "inna" ? { format: v } : { format: v, w: f[2], h: f[3] }); }} />
+        ${F.format === "inna" && html`<div class="grid2">
+          <${Num} label="Bok A" unit="mm" value=${F.w} onChange=${(v) => setF({ w: v })} />
+          <${Num} label="Bok B" unit="mm" value=${F.h} onChange=${(v) => setF({ h: v })} /></div>`}
+        <${Seg} label="Włókno" value=${F.wlokno} options=${[["dlugie", "Długie (LG)"], ["krotkie", "Krótkie (SG)"]]} onChange=${(v) => setF({ wlokno: v })}
+          hint=${`Włókno wzdłuż boku ${mm(F.wlokno === "dlugie" ? Math.max(F.w, F.h) : Math.min(F.w, F.h))} mm.${T.cyfra.on && ciezki && F.wlokno === "dlugie" ? ` Przy ${z.papier.gram} g producenci zalecają krótkie — decyzja operatora.` : ""}`} />`}
+      <${Num} label="Margines" unit="mm" value=${z.margines} onChange=${(v) => up((x) => { x.margines = v; })} hint="Na każdym boku: niedruk + znaczniki cięcia." />
+      ${F.tryb === "wybrana" && html`
+        <${Check} label="Ustaw siatkę użytków ręcznie" checked=${F.siatka} onChange=${(v) => setF({ siatka: v })} />
+        ${F.siatka && html`<div class="grid3">
+          <${Num} label="W poziomie" value=${F.nx} hint="0 = najwięcej" onChange=${(v) => setF({ nx: Math.round(v) })} />
+          <${Num} label="W pionie" value=${F.ny} hint="0 = najwięcej" onChange=${(v) => setF({ ny: Math.round(v) })} />
+          <${Sel} label="Użytek" value=${String(F.urot)} options=${[["auto", "Wg włókna"], ["false", `${mm(z.uzytek.w)} × ${mm(z.uzytek.h)}`], ["true", "Obrócony"]]} onChange=${(v) => setF({ urot: v === "auto" ? "auto" : v === "true" })} />
+        </div>`}`}
+    </${Group}>
+
+    <${Group} id="papier" title="3  Arkusz, który kupuję i tnę" open=${open.papier} toggle=${tg("papier")}
       summary=${`${fmt.id === "inny" ? `${z.arkusz.a} × ${z.arkusz.b}` : fmt.nazwa} · ${z.arkusz.wlokno === "dlugie" ? "LG" : "SG"} · ${z.papier.gram} g · ${zl(cena1)}`}>
-      <${Sel} label="Arkusz bazowy" value=${z.arkusz.format} options=${PAPIER_FORMATY.map((f) => [f.id, f.nazwa])}
+      <${Sel} label="Format" value=${z.arkusz.format} options=${PAPIER_FORMATY.map((f) => [f.id, f.nazwa])}
         onChange=${(v) => up((x) => { const f = PAPIER_FORMATY.find((p) => p.id === v); x.arkusz.format = v; if (v !== "inny") { x.arkusz.a = f.a; x.arkusz.b = f.b; } })} />
       ${z.arkusz.format === "inny" && html`<div class="grid2">
         <${Num} label="Bok A" unit="mm" value=${z.arkusz.a} onChange=${(v) => up((x) => { x.arkusz.a = v; })} />
         <${Num} label="Bok B" unit="mm" value=${z.arkusz.b} onChange=${(v) => up((x) => { x.arkusz.b = v; })} />
       </div>`}
-      <${Seg} label="Włókno arkusza" value=${z.arkusz.wlokno} onChange=${(v) => up((x) => { x.arkusz.wlokno = v; })}
+      <${Seg} label="Włókno" value=${z.arkusz.wlokno} onChange=${(v) => up((x) => { x.arkusz.wlokno = v; })}
         options=${[["dlugie", "Długie (LG)"], ["krotkie", "Krótkie (SG)"]]}
-        hint=${`Włókno równoległe do ${z.arkusz.wlokno === "dlugie" ? "dłuższego" : "krótszego"} boku arkusza. Papiery ozdobne B1 — najczęściej długie.`} />
+        hint=${`Włókno równoległe do ${z.arkusz.wlokno === "dlugie" ? "dłuższego" : "krótszego"} boku. Papiery ozdobne B1 — najczęściej długie. Jeśli kupujesz od razu arkusz drukowy (np. SRA3+), wybierz ten sam format co w punkcie 2.`} />
       <${Txt} label="Nazwa papieru" value=${z.papier.nazwa} placeholder="np. Materica Kraft 360 g" onChange=${(v) => up((x) => { x.papier.nazwa = v; })} />
-      <div class="grid2">
+      <div class="grid3">
         <${Num} label="Gramatura" unit="g" value=${z.papier.gram} onChange=${(v) => up((x) => { x.papier.gram = v; })} />
         <${Num} label="Grubość" unit="µm" value=${z.papier.mikrony} onChange=${(v) => up((x) => { x.papier.mikrony = v; })} />
+        <${Num} label="Zwyżka" unit="ark." value=${z.zwyzkaArkuszy} onChange=${(v) => up((x) => { x.zwyzkaArkuszy = Math.round(v); })} />
       </div>
       <div class="grid2">
         <${Num} label="Cena dostawcy / ark." unit="zł" value=${z.papier.cenaDostawcy} onChange=${(v) => up((x) => { x.papier.cenaDostawcy = v; })} hint=${`z marżą ${pct(C.marzaPapier)}: ${zl(z.papier.cenaDostawcy * (1 + C.marzaPapier))}`} />
@@ -192,29 +215,7 @@ function Zlecenie({ z, up, M, C }) {
         </div>`}
     </${Group}>
 
-    <${Group} id="druk" title="Druk" open=${open.druk} toggle=${tg("druk")} summary=${`${F.tryb === "wybrana" ? `${mm(F.w)} × ${mm(F.h)} ${F.wlokno === "dlugie" ? "LG" : "SG"}` : "formatka dobierana"} · ${druk}`}>
-      <${Seg} label="Formatka do druku" value=${F.tryb} options=${[["wybrana", "Wskazuję formatkę"], ["auto", "Dobierz za mnie"]]} onChange=${(v) => setF({ tryb: v })}
-        hint=${F.tryb === "auto" ? "Kalkulator sam wybiera wymiar formatki i jej włókno — najtańszy wariant." : null} />
-      ${F.tryb === "wybrana" && html`
-        <${Sel} label="Format" value=${F.format} options=${FORMATKI.map(([v, l]) => [v, l])} onChange=${(v) => { const f = FORMATKI.find((x) => x[0] === v); setF(v === "inna" ? { format: v } : { format: v, w: f[2], h: f[3] }); }} />
-        ${F.format === "inna" && html`<div class="grid2">
-          <${Num} label="Bok A" unit="mm" value=${F.w} onChange=${(v) => setF({ w: v })} />
-          <${Num} label="Bok B" unit="mm" value=${F.h} onChange=${(v) => setF({ h: v })} /></div>`}
-        <${Seg} label="Włókno formatki" value=${F.wlokno} options=${[["dlugie", "Długie (LG)"], ["krotkie", "Krótkie (SG)"]]} onChange=${(v) => setF({ wlokno: v })}
-          hint=${`Włókno wzdłuż boku ${mm(F.wlokno === "dlugie" ? Math.max(F.w, F.h) : Math.min(F.w, F.h))} mm.${T.cyfra.on && ciezki && F.wlokno === "dlugie" ? ` Przy ${z.papier.gram} g producenci zalecają krótkie — decyzja operatora.` : ""}`} />
-        <${Check} label="Ustaw siatkę użytków ręcznie" checked=${F.siatka} onChange=${(v) => setF({ siatka: v })} />
-        ${F.siatka && html`<div class="grid3">
-          <${Num} label="W poziomie" value=${F.nx} hint="0 = najwięcej" onChange=${(v) => setF({ nx: Math.round(v) })} />
-          <${Num} label="W pionie" value=${F.ny} hint="0 = najwięcej" onChange=${(v) => setF({ ny: Math.round(v) })} />
-          <${Sel} label="Użytek" value=${String(F.urot)} options=${[["auto", "Wg włókna"], ["false", `${mm(z.uzytek.w)} × ${mm(z.uzytek.h)}`], ["true", "Obrócony"]]} onChange=${(v) => setF({ urot: v === "auto" ? "auto" : v === "true" })} />
-        </div>`}
-        `}
-      <div class="grid2">
-        <${Num} label="Rozcinka między użytkami" unit="mm" value=${z.rozcinka} onChange=${(v) => up((x) => { x.rozcinka = v; })}
-          hint=${z.rozcinka > 0 ? "Spady + rzaz; tniemy dwa razy na przerwę." : "Użytki stykają się — jedno wspólne cięcie."} />
-        <${Num} label="Margines formatki" unit="mm" value=${z.margines} onChange=${(v) => up((x) => { x.margines = v; })} hint="Na każdym boku: niedruk + znaczniki." />
-      </div>
-      <div class="group__sub" style="margin-top:0">Technologia</div>
+    <${Group} id="druk" title="Technologia" open=${open.druk} toggle=${tg("druk")} summary=${druk}>
       <${Tech} label="Druk cyfrowy" note=${M.cyfra.nazwa} t=${T.cyfra} set=${setT("cyfra")}>
         <${Sel} label="Kolorystyka" value=${T.cyfra.kolor} options=${Object.keys(C.cyfra.kolory).map((k) => [k, k])} onChange=${(v) => setT("cyfra")({ ...T.cyfra, kolor: v })} />
         <${Check} label=${`Dopuść bypass (arkusz do ${M.cyfra.dlugoscMaxBypass} mm, wolniej, ręcznie)`} checked=${z.pozwolBypass} onChange=${(v) => up((x) => { x.pozwolBypass = v; })} />
