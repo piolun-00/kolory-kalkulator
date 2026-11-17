@@ -9,7 +9,10 @@ UI i komentarze po polsku. Styl i tokeny 1:1 z edytora brandmanuala (piolun-00/b
 - `engine/` — logika bez interfejsu (do wywołania później przez agenta / CRM):
   - `config.js` — maszyny (PX300 wg producenta), formaty arkuszy, cenniki z arkusza „WunderWaffe”.
   - `cut.js` — cięcie gilotynowe (DP po pozycjach normalnych), reguły włókna (produkt + PX300), stacje
-    (kaszerowanie 500×300, sztanca B2, sito/tłoczenie montaż 1–4), `planuj()` → scenariusze, `wariantReczny()` → wariant pracownika z ostrzeżeniami.
+    (kaszerowanie 500×300, sztanca B2, sito/tłoczenie montaż 1–4), `planuj()` → sugestie kalkulatora, `wariantFormatki()` → formatka wskazana w wycenie.
+    Tak pracuje drukarnia: wycenia się wskazaną formatkę (np. SRA3+) z wybranym włóknem LG/SG; z tego wynika ułożenie
+    na arkuszu bazowym i siatka użytków. Reguły maszyn (PX300) i stacji przy wskazanej formatce tylko ostrzegają.
+    Sugestie (z regułami jako filtrem) są obok do porównania, z przyciskiem „Przyjmij jako formatkę do druku”.
   - `pricing.js` — wycena 1:1 z arkusza (komórki źródłowe w komentarzach); miejsca „DO DECYZJI” liczone jak w arkuszu.
     Wyjątki od arkusza: użytki/arkusze z silnika (nie ręcznie, nie „B1 = 4 SRA3”); cięcie = linie × stosy × stawka (min. 30 zł).
 - `app/app.js` — 3 kolumny: nawigacja · formularz · podgląd (rzut cięcia SVG, matryca decyzji, wycena, karta cięcia).

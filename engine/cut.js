@@ -253,42 +253,69 @@ function metryki(z, M, arkusz, k, g, cyfraInfo) {
   };
 }
 
-// ===== Wariant ręczny =====
-// Pracownik sam ustala formatkę: wymiar (0 = ciasno wokół siatki), siatkę nx × ny, obrót użytku i orientację formatek
-// na arkuszu. Silnik nie odrzuca takiego wariantu — liczy go i zbiera ostrzeżenia (maszyna, włókno, stacje),
-// bo człowiek może wiedzieć coś, czego reguły nie znają (np. konkretna partia papieru, zgoda klienta).
-// r = { nx, ny, urot, fw, fh, orient: "auto" | "pion" | "poziom" }
-export function wariantReczny(z, M, plan, r, gap = 3) {
+// ===== Wybrana formatka =====
+// Tak pracuje drukarnia: w wycenie wskazuje się formatkę druku (np. SRA3+ 330 × 488) i jej włókno — długie albo krótkie.
+// Z tego wynika reszta: jak położyć formatki na arkuszu bazowym, żeby dostać to włókno, i ile użytków zmieści się
+// na formatce przy wymogu włókna produktu. Reguły maszyn i stacji nie odrzucają wariantu — dają ostrzeżenia.
+// f = { w, h, wlokno: "dlugie" | "krotkie", nx, ny (0 = najwięcej), urot: "auto" | true | false }
+export function wariantFormatki(z, M, plan, f, gap = 3) {
   const { arkusz, uzW, uzH, stacje, maCyfre, gram, margin } = plan.ctx;
-  const uw = r.urot ? z.uzytek.h : z.uzytek.w, uh = r.urot ? z.uzytek.w : z.uzytek.h;
-  const nx = Math.max(1, Math.round(r.nx || 1)), ny = Math.max(1, Math.round(r.ny || 1));
-  const ciasna = wymiarFormatki(nx, ny, uw, uh, gap, margin);
-  const fw = r.fw > 0 ? r.fw : ciasna.w, fh = r.fh > 0 ? r.fh : ciasna.h;
-  const ostrz = [];
-  if (fw + EPS < ciasna.w || fh + EPS < ciasna.h) ostrz.push(`Siatka ${nx} × ${ny} nie mieści się w formatce ${fw} × ${fh} — potrzeba min. ${ciasna.w} × ${ciasna.h} mm.`);
-  for (const st of stacje) if (!miesciSie(fw, fh, st)) ostrz.push(`${st.nazwa}: formatka większa niż ${st.maxA} × ${st.maxB} mm.`);
-  const k = { uw, uh, urot: !!r.urot, nx, ny, fw, fh, standard: false, reczny: true };
-  const rots = r.orient === "pion" ? [false] : r.orient === "poziom" ? [true] : [false, true];
-  const pieces = [];
-  let cyfraInfo = null;
-  const uwagi = new Set();
-  for (const rot of rots) {
-    const g = rot ? flip(arkusz.grain) : arkusz.grain;
-    if (!wloknoOK(uw, uh, g, z.uzytek.wlokno)) uwagi.add(`Formatki ${rot ? "obrócone" : "nieobrócone"}: włókno w użytku niezgodne z wymogiem produktu.`);
-    if (maCyfre) {
-      const c = cyfraPrzyjmie(fw, fh, g, gram, M.cyfra, z.pozwolBypass);
-      if (!c.ok) uwagi.add(`${M.cyfra.nazwa} (${rot ? "formatki obrócone" : "formatki nieobrócone"}): ${c.powod}.`);
-      else cyfraInfo = cyfraInfo || c;
-    }
-    pieces.push({ w: rot ? fh : fw, h: rot ? fw : fh, rot });
+  const fw = f.w, fh = f.h, ostrz = [];
+  // Arkusz bazowy = formatka (np. kupione SRA3): bez cięcia arkusza, włókno takie jak arkusza.
+  const toSamo = (Math.abs(arkusz.w - fw) < 0.5 && Math.abs(arkusz.h - fh) < 0.5) || (Math.abs(arkusz.w - fh) < 0.5 && Math.abs(arkusz.h - fw) < 0.5);
+  let g, placement;
+  if (toSamo) {
+    const rot = Math.abs(arkusz.w - fw) >= 0.5;
+    g = rot ? flip(arkusz.grain) : arkusz.grain;
+    placement = { count: 1, placements: [{ x: 0, y: 0, w: rot ? fh : fw, h: rot ? fw : fh, rot }], ciec: 0 };
+  } else {
+    // oś włókna w układzie formatki: długie = wzdłuż dłuższego boku
+    const lng = osDlugiego(fw, fh) || "y";
+    g = f.wlokno === "krotkie" ? flip(lng) : lng;
+    // jedyna orientacja na arkuszu, która daje to włókno (kwadrat — obie)
+    const rots = !osDlugiego(fw, fh) ? [false, true] : [arkusz.grain === g ? false : true];
+    placement = gilotyna(uzW, uzH, rots.map((rot) => ({ w: rot ? fh : fw, h: rot ? fw : fh, rot })));
+    if (!placement.count) return { pusty: true, ostrzezenia: [`Formatka ${fw} × ${fh} mm z włóknem ${f.wlokno === "krotkie" ? "krótkim" : "długim"} nie mieści się na arkuszu ${arkusz.w} × ${arkusz.h} (po obcięciu krawędzi). Spróbuj drugiego kierunku włókna.`] };
+    placement.ciec += 4;
   }
-  const g = gilotyna(uzW, uzH, pieces);
-  if (!g.count) ostrz.push(`Formatka ${fw} × ${fh} mm nie mieści się na arkuszu ${arkusz.w} × ${arkusz.h} po obcięciu krawędzi.`);
-  // ostrzeżenia dotyczą tylko orientacji, które faktycznie trafiły na arkusz
-  const uzyte = new Set(g.placements.map((p) => p.rot));
-  for (const u of uwagi) if ((u.includes("nieobrócone") && uzyte.has(false)) || (u.includes(" obrócone") && !u.includes("nieobrócone") && uzyte.has(true))) ostrz.push(u);
-  if (!g.count) return { reczny: true, ostrzezenia: ostrz, pusty: true };
-  const m = metryki(z, M, arkusz, k, g, cyfraInfo);
-  m.id = "reczny"; m.reczny = true; m.ostrzezenia = ostrz;
+  // Użytki na formatce: orientacja zgodna z włóknem produktu, najwięcej sztuk; ręczna siatka nadpisuje
+  const avW = fw - 2 * margin, avH = fh - 2 * margin;
+  const opcje = [false, true].map((urot) => {
+    const uw = urot ? z.uzytek.h : z.uzytek.w, uh = urot ? z.uzytek.w : z.uzytek.h;
+    return { urot, uw, uh, nx: ileWRzedzie(avW, uw, gap), ny: ileWRzedzie(avH, uh, gap), wl: wloknoOK(uw, uh, g, z.uzytek.wlokno) };
+  });
+  let o = f.urot === true || f.urot === false ? opcje.find((x) => x.urot === f.urot) : null;
+  if (!o) {
+    const zgodne = opcje.filter((x) => x.wl && x.nx * x.ny > 0);
+    o = (zgodne.length ? zgodne : opcje).reduce((a, b) => (b.nx * b.ny > a.nx * a.ny ? b : a));
+  }
+  if (!o.wl) ostrz.push(`Włókno w użytku niezgodne z wymogiem produktu (${z.uzytek.wlokno === "dlugi" ? "wzdłuż dłuższego boku" : "wzdłuż krótszego boku"}) — przy tej formatce i tym włóknie nie da się tego spełnić.`);
+  let nx = o.nx, ny = o.ny;
+  if (f.nx > 0 || f.ny > 0) {
+    const rx = f.nx > 0 ? Math.round(f.nx) : nx, ry = f.ny > 0 ? Math.round(f.ny) : ny;
+    const need = wymiarFormatki(rx, ry, o.uw, o.uh, gap, margin);
+    if (need.w > fw + EPS || need.h > fh + EPS) ostrz.push(`Siatka ${rx} × ${ry} nie mieści się w formatce — potrzeba ${need.w} × ${need.h} mm (z marginesem ${margin} mm i wycinką ${gap} mm).`);
+    nx = rx; ny = ry;
+  }
+  if (!nx || !ny) return { pusty: true, ostrzezenia: [...ostrz, `Użytek ${z.uzytek.w} × ${z.uzytek.h} mm nie mieści się na formatce ${fw} × ${fh} mm z marginesem ${margin} mm.`] };
+  if (maCyfre) {
+    const c = cyfraPrzyjmie(fw, fh, g, gram, M.cyfra, z.pozwolBypass);
+    if (!c.ok) ostrz.push(`${M.cyfra.nazwa}: ${c.powod}${c.powod.includes("włókno") ? " (zalecenie producentów maszyn — decyzja operatora)" : ""}.`);
+  }
+  for (const st of stacje) if (!miesciSie(fw, fh, st)) ostrz.push(`${st.nazwa}: formatka większa niż ${st.maxA} × ${st.maxB} mm.`);
+  const cInfo = maCyfre ? (() => { const a = cyfraPrzyjmie(fw, fh, g, 0, M.cyfra, true); return a.ok ? a : null; })() : null;
+  const k = { uw: o.uw, uh: o.uh, urot: o.urot, nx, ny, fw, fh, standard: false, wybrana: true };
+  const m = metryki(z, M, arkusz, k, placement, cInfo);
+  if (toSamo) m.ciecia.arkusz = 0;
+  m.id = "wybrana"; m.wybrana = true; m.ostrzezenia = ostrz;
+  m.formatka.wlokno = osDlugiego(fw, fh) && g !== osDlugiego(fw, fh) ? "krotkie" : "dlugie";
   return m;
+}
+
+// Kierunek włókna formatki z sugestii (dla przycisku „przyjmij”): wg większości formatek na arkuszu
+export function wloknoFormatki(plan, s) {
+  const rot = s.uklad.filter((p) => p.rot).length > s.uklad.length / 2;
+  const g = rot ? flip(plan.arkusz.grain) : plan.arkusz.grain;
+  const lng = osDlugiego(s.formatka.w, s.formatka.h);
+  return !lng || g === lng ? "dlugie" : "krotkie";
 }

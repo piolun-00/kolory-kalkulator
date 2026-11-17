@@ -2,7 +2,7 @@
 // Uruchomienie: node --test tests/
 import test from "node:test";
 import assert from "node:assert/strict";
-import { gilotyna, wymiarFormatki, ileWRzedzie, cyfraPrzyjmie, planuj, wariantReczny } from "../engine/cut.js";
+import { gilotyna, wymiarFormatki, ileWRzedzie, cyfraPrzyjmie, planuj, wariantFormatki } from "../engine/cut.js";
 import { wycena, cenaPrzelotu } from "../engine/pricing.js";
 import { MASZYNY, CENNIK } from "../engine/config.js";
 
@@ -123,15 +123,38 @@ test("Stosy: 1000 ark. × 0,405 mm = 405 mm → 6 stosów po 80 mm", () => {
   assert.equal(s.ciecia.stosyArkusz, Math.ceil((s.arkuszy * 0.405) / 80));
 });
 
-test("Wariant ręczny: liczy się mimo złamania reguły włókna i zbiera ostrzeżenie", () => {
-  const z = zl({ uzytek: { w: 90, h: 50, wlokno: "dowolne" }, technologie: { cyfra: { on: true, kolor: "4+0" } } });
+test("Wybrana formatka SRA3+ z B1 LG: włókno długie → 4 szt., krótkie → 3 szt.", () => {
+  const z = zl({ papier: { gram: 350, mikrony: 405 }, uzytek: { w: 90, h: 50, wlokno: "dowolne" }, technologie: { cyfra: { on: true, kolor: "4+0" } } });
   const plan = planuj(z, MASZYNY);
-  const r = wariantReczny(z, MASZYNY, plan, { nx: 3, ny: 9, fw: 330, fh: 488, orient: "pion" });
-  assert.equal(r.formatek.naArkusz, 4);   // „pion” na długim włóknie → 4 formatki, ale PX300 przy 350 g tego nie chce
-  assert.ok(r.ostrzezenia.some((o) => o.includes("PX300")));
-  const ok = wariantReczny(z, MASZYNY, plan, { nx: 3, ny: 9, fw: 330, fh: 488, orient: "poziom" });
-  assert.equal(ok.formatek.naArkusz, 3);
-  assert.equal(ok.ostrzezenia.length, 0);
-  const zle = wariantReczny(z, MASZYNY, plan, { nx: 4, ny: 9, fw: 330, fh: 488 });
-  assert.ok(zle.ostrzezenia.some((o) => o.includes("nie mieści się w formatce")));
+  const lg = wariantFormatki(z, MASZYNY, plan, { w: 330, h: 488, wlokno: "dlugie" });
+  const sg = wariantFormatki(z, MASZYNY, plan, { w: 330, h: 488, wlokno: "krotkie" });
+  assert.equal(lg.formatek.naArkusz, 4);
+  assert.equal(sg.formatek.naArkusz, 3);
+  assert.equal(lg.formatka.uzytkow, 30);                       // 6 × 5 użytków obróconych (50 wzdłuż 330: 6·50+5·3 = 315 ≤ 316)
+  assert.ok(lg.ostrzezenia.some((o) => o.includes("PX300")));  // karton 350 g na LG — ostrzeżenie, nie blokada
+  assert.equal(sg.ostrzezenia.length, 0);
+});
+
+test("Wybrana formatka: wizytówki z włóknem wzdłuż dłuższego boku obracają się na formatce", () => {
+  const z = zl({ uzytek: { w: 90, h: 50, wlokno: "dlugi" }, technologie: { cyfra: { on: true, kolor: "4+0" } } });
+  const plan = planuj(z, MASZYNY);
+  const sg = wariantFormatki(z, MASZYNY, plan, { w: 330, h: 488, wlokno: "krotkie" }); // włókno ∥ 330 → 90 wzdłuż 330
+  assert.equal(sg.formatka.uw, 90);
+  const lg = wariantFormatki(z, MASZYNY, plan, { w: 330, h: 488, wlokno: "dlugie" });  // włókno ∥ 488 → 90 wzdłuż 488
+  assert.equal(lg.formatka.uw, 50);
+});
+
+test("Arkusz bazowy = formatka (kupione SRA3+): 1 z arkusza, bez cięcia arkusza", () => {
+  const z = zl({ arkusz: { a: 330, b: 488, wlokno: "krotkie" }, technologie: { cyfra: { on: true, kolor: "4+0" } } });
+  const plan = planuj(z, MASZYNY);
+  const w = wariantFormatki(z, MASZYNY, plan, { w: 330, h: 488, wlokno: "dlugie" });
+  assert.equal(w.formatek.naArkusz, 1);
+  assert.equal(w.ciecia.arkusz, 0);
+  assert.equal(w.formatka.wlokno, "krotkie");                  // włókno dyktuje kupiony arkusz
+});
+
+test("Ręczna siatka większa niż formatka → ostrzeżenie", () => {
+  const z = zl({ technologie: { cyfra: { on: true, kolor: "4+0" } } });
+  const w = wariantFormatki(z, MASZYNY, planuj(z, MASZYNY), { w: 330, h: 488, wlokno: "krotkie", nx: 4, ny: 9 });
+  assert.ok(w.ostrzezenia.some((o) => o.includes("nie mieści się w formatce")));
 });

@@ -125,34 +125,34 @@ export function wycena(z, s, C) {
 
 // Scenariusze z wyceną, posortowane od najtańszego. Do każdego dopisujemy różnicę względem najtańszego
 // i względem „jak dziś” (standardowa formatka SRA3+ / pierwsza z brzegu), żeby matryca decyzji miała punkt odniesienia.
-export function porownaj(z, plan, C, reczny = null) {
+export function porownaj(z, plan, C, wybrana = null) {
   const lista = plan.scenariusze.map((s) => ({ ...s, wycena: wycena(z, s, C) }));
-  const rec = reczny && !reczny.pusty ? { ...reczny, wycena: wycena(z, reczny, C) } : null;
+  const rec = wybrana && !wybrana.pusty ? { ...wybrana, wycena: wycena(z, wybrana, C) } : null;
   // remis cenowy: mniej formatek, mniej arkuszy, więcej użytków z arkusza (zapas na makulaturę), na końcu znana formatka standardowa
   lista.sort((a, b) => a.wycena.netto - b.wycena.netto || a.formatek.zArkuszy - b.formatek.zArkuszy || a.arkuszy - b.arkuszy
     || b.uzytkiNaArkusz - a.uzytkiNaArkusz || (b.formatka.standard ? 1 : 0) - (a.formatka.standard ? 1 : 0));
   const best = lista[0];
   const ref = lista.find((s) => s.formatka.standard) || null;
-  if (rec) lista.push(rec); // ręczny nie bierze udziału w wyborze „najtańszego” — porównujemy go z sugestiami
+  if (rec) lista.push(rec); // wybrana formatka nie bierze udziału w wyborze „najtańszego” — porównujemy ją z sugestiami
   for (const s of lista) {
     s.roznica = best ? r2(s.wycena.netto - best.wycena.netto) : 0;
     s.wzgledemStandardu = ref ? { netto: r2(s.wycena.netto - ref.wycena.netto), arkuszy: s.arkuszy - ref.arkuszy, formatek: s.formatek.zArkuszy - ref.formatek.zArkuszy } : null;
   }
-  return { lista, best, ref, reczny: rec };
+  return { lista, best, ref, wybrana: rec };
 }
 
 // Krótkie scenariusze do matrycy decyzji: najtańszy, najmniej papieru, najmniej formatek (przelotów / pracy ręcznej), standard.
 export function wyroznione(cmp) {
   const { best, ref } = cmp;
-  const lista = cmp.lista.filter((s) => !s.reczny);
-  if (!lista.length) return cmp.reczny ? [{ s: cmp.reczny, role: ["ręczny"] }] : [];
+  const lista = cmp.lista.filter((s) => !s.wybrana);
+  if (!lista.length) return cmp.wybrana ? [{ s: cmp.wybrana, role: ["wybrana"] }] : [];
   const minBy = (f) => lista.reduce((a, b) => (f(b) < f(a) || (f(b) === f(a) && b.wycena.netto < a.wycena.netto) ? b : a));
   const out = [];
   const push = (s, rola) => { if (!s) return; const e = out.find((o) => o.s === s); if (e) e.role.push(rola); else out.push({ s, role: [rola] }); };
-  push(best, "najtańszy");
+  push(cmp.wybrana, "wybrana");
+  push(best, "najtańsza sugestia");
   push(minBy((s) => s.arkuszy), "najmniej papieru");
   push(minBy((s) => s.formatek.zArkuszy), "najmniej formatek");
   push(ref, "standard SRA3+");
-  push(cmp.reczny, "ręczny");
   return out;
 }

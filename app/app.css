@@ -177,3 +177,5 @@ button { cursor: pointer; }
 .manual__grid > .f:nth-child(n+5) { grid-column: span 2; }
 .tag.is--manual { background: #e08a00; color: #fff; }
 .btn.is--warn { border-color: var(--warn); color: var(--warn); }
+.card__body:has(> .tbl) { overflow-x: auto; }
+.tbl th, .tbl td { padding-left: 6px; padding-right: 6px; }

@@ -10,10 +10,11 @@ import { h, render } from "preact";
 import { useState, useMemo, useEffect, useRef } from "preact/hooks";
 import htm from "htm";
 import { MASZYNY, CENNIK, PAPIER_FORMATY, WYCINKA } from "../engine/config.js";
-import { planuj, wariantReczny } from "../engine/cut.js";
+import { planuj, wariantFormatki, wloknoFormatki } from "../engine/cut.js";
 import { porownaj, wyroznione, cenaArkusza } from "../engine/pricing.js";
 
 const html = htm.bind(h);
+const FORMATKI = [["sra3+", "SRA3+ 330 × 488", 330, 488], ["sra3", "SRA3 320 × 450", 320, 450], ["a3", "A3 297 × 420", 297, 420], ["inna", "Własny format", 0, 0]];
 const VERSION = new URL(import.meta.url).searchParams.get("v") || "dev";
 
 // ===== Pamięć przeglądarki (na razie lokalnie; wspólna baza dla Kolorów — w kolejnym etapie) =====
@@ -39,8 +40,8 @@ export const zlecenieDomyslne = () => ({
   papier2: { nazwa: "", cenaDostawcy: 0, cenaLicze: 0 },
   pozwolBypass: false,
   wysylka: false,
-  // Wariant ręczny: pracownik przejmuje podział od kalkulatora i zmienia go sam
-  reczny: { on: false, nx: 2, ny: 5, urot: false, fw: 0, fh: 0, orient: "auto" },
+  // Formatka do druku: wskazana w wycenie (jak w drukarni) albo dobrana przez kalkulator
+  formatka: { tryb: "wybrana", format: "sra3+", w: 330, h: 488, wlokno: "krotkie", siatka: false, nx: 0, ny: 0, urot: "auto" },
   technologie: {
     cyfra: { on: true, kolor: "4+4" },
     sito: { on: false, rodzaj: "Jeden przelot", ustawien: 1, klisz: 1, swiecen: 1 },
@@ -129,6 +130,7 @@ function Zlecenie({ z, up, M, C }) {
   const druk = [T.cyfra.on && `cyfra ${T.cyfra.kolor}`, T.sito.on && "sito", T.tloczenie.on && "tłoczenie", T.letterpress.on && "letterpress"].filter(Boolean).join(" + ") || "bez druku";
   const wykList = ["kaszerowanie", "sztancowanie", "foliowanie", "bigowanie", "barwienie", "rozkowanie", "laser", "ploter", "oczkowanie", "blona", "szycie", "nfc", "wiercenie", "edycja"].filter((k) => T[k]?.on);
   const ciezki = z.papier.gram >= M.cyfra.progWloknaGram;
+  const F = z.formatka, setF = (patch) => up((x) => { Object.assign(x.formatka, patch); });
 
   return html`<div class="panel__inner">
     <div>
@@ -177,7 +179,7 @@ function Zlecenie({ z, up, M, C }) {
         <${Num} label="Cena dostawcy / ark." unit="zł" value=${z.papier.cenaDostawcy} onChange=${(v) => up((x) => { x.papier.cenaDostawcy = v; })} hint=${`z marżą ${pct(C.marzaPapier)}: ${zl(z.papier.cenaDostawcy * (1 + C.marzaPapier))}`} />
         <${Num} label="Liczę po" unit="zł" value=${z.papier.cenaLicze} onChange=${(v) => up((x) => { x.papier.cenaLicze = v; })} hint="0 = cena z marżą" />
       </div>
-      ${T.cyfra.on && ciezki && html`<p class="f__warn">Od ${M.cyfra.progWloknaGram} g ${M.cyfra.nazwa} wymaga włókna wzdłuż krawędzi wiodącej (330 mm) — część podziałów arkusza odpada.</p>`}
+      ${T.cyfra.on && ciezki && html`<p class="f__hint">Od ${M.cyfra.progWloknaGram} g producenci zalecają na ${M.cyfra.nazwa} włókno wzdłuż krawędzi wiodącej (krótkie włókno na SRA3).</p>`}
       ${T.cyfra.on && z.papier.gram > M.cyfra.gramMaxSzuflady && z.papier.gram <= M.cyfra.gramMax && html`<p class="f__hint">Powyżej ${M.cyfra.gramMaxSzuflady} g tylko bypass lub podajnik OHCF${z.papier.gram > M.cyfra.gramMaxDupleks ? `; powyżej ${M.cyfra.gramMaxDupleks} g dupleks ręczny` : ""}.</p>`}
       ${T.cyfra.on && z.papier.gram > M.cyfra.gramMax && html`<p class="f__warn">${M.cyfra.nazwa} przyjmuje maks. ${M.cyfra.gramMax} g.</p>`}
       ${T.kaszerowanie.on && html`<div class="group__sub">Papier 2 (kaszerowanie)</div>
@@ -188,7 +190,23 @@ function Zlecenie({ z, up, M, C }) {
         </div>`}
     </${Group}>
 
-    <${Group} id="druk" title="Druk" open=${open.druk} toggle=${tg("druk")} summary=${druk}>
+    <${Group} id="druk" title="Druk" open=${open.druk} toggle=${tg("druk")} summary=${`${F.tryb === "wybrana" ? `${mm(F.w)} × ${mm(F.h)} ${F.wlokno === "dlugie" ? "LG" : "SG"}` : "formatka dobierana"} · ${druk}`}>
+      <${Seg} label="Formatka do druku" value=${F.tryb} options=${[["wybrana", "Wskazuję formatkę"], ["auto", "Dobierz za mnie"]]} onChange=${(v) => setF({ tryb: v })}
+        hint=${F.tryb === "auto" ? "Kalkulator sam wybiera wymiar formatki i jej włókno — najtańszy wariant." : null} />
+      ${F.tryb === "wybrana" && html`
+        <${Sel} label="Format" value=${F.format} options=${FORMATKI.map(([v, l]) => [v, l])} onChange=${(v) => { const f = FORMATKI.find((x) => x[0] === v); setF(v === "inna" ? { format: v } : { format: v, w: f[2], h: f[3] }); }} />
+        ${F.format === "inna" && html`<div class="grid2">
+          <${Num} label="Bok A" unit="mm" value=${F.w} onChange=${(v) => setF({ w: v })} />
+          <${Num} label="Bok B" unit="mm" value=${F.h} onChange=${(v) => setF({ h: v })} /></div>`}
+        <${Seg} label="Włókno formatki" value=${F.wlokno} options=${[["dlugie", "Długie (LG)"], ["krotkie", "Krótkie (SG)"]]} onChange=${(v) => setF({ wlokno: v })}
+          hint=${`Włókno wzdłuż boku ${mm(F.wlokno === "dlugie" ? Math.max(F.w, F.h) : Math.min(F.w, F.h))} mm.${T.cyfra.on && ciezki && F.wlokno === "dlugie" ? ` Przy ${z.papier.gram} g producenci zalecają krótkie — decyzja operatora.` : ""}`} />
+        <${Check} label="Ustaw siatkę użytków ręcznie" checked=${F.siatka} onChange=${(v) => setF({ siatka: v })} />
+        ${F.siatka && html`<div class="grid3">
+          <${Num} label="W poziomie" value=${F.nx} hint="0 = najwięcej" onChange=${(v) => setF({ nx: Math.round(v) })} />
+          <${Num} label="W pionie" value=${F.ny} hint="0 = najwięcej" onChange=${(v) => setF({ ny: Math.round(v) })} />
+          <${Sel} label="Użytek" value=${String(F.urot)} options=${[["auto", "Wg włókna"], ["false", `${mm(z.uzytek.w)} × ${mm(z.uzytek.h)}`], ["true", "Obrócony"]]} onChange=${(v) => setF({ urot: v === "auto" ? "auto" : v === "true" })} />
+        </div>`}
+        <div class="group__sub" style="margin-top:0">Technologia</div>`}
       <${Tech} label="Druk cyfrowy" note=${M.cyfra.nazwa} t=${T.cyfra} set=${setT("cyfra")}>
         <${Sel} label="Kolorystyka" value=${T.cyfra.kolor} options=${Object.keys(C.cyfra.kolory).map((k) => [k, k])} onChange=${(v) => setT("cyfra")({ ...T.cyfra, kolor: v })} />
         <${Check} label=${`Dopuść bypass (arkusz do ${M.cyfra.dlugoscMaxBypass} mm, wolniej, ręcznie)`} checked=${z.pozwolBypass} onChange=${(v) => up((x) => { x.pozwolBypass = v; })} />
@@ -261,7 +279,8 @@ function GrainLines({ w, h, axis, step = 22 }) {
   return html`<g stroke="#111" stroke-opacity=".07" vector-effect="non-scaling-stroke" pointer-events="none">${L}</g>`;
 }
 function ArkuszSVG({ plan, s, M }) {
-  const A = plan.arkusz, ob = M.gilotyna.obciecieArkusza, f = s.formatka;
+  const A = plan.arkusz, f = s.formatka;
+  const ob = s.ciecia.arkusz === 0 ? 0 : M.gilotyna.obciecieArkusza; // arkusz = formatka → bez obcinania
   const showItems = s.uzytkiNaArkusz <= 2500;
   return html`<svg viewBox=${`-2 -2 ${A.w + 4} ${A.h + 4}`} role="img" aria-label="Rzut arkusza bazowego">
     <defs><pattern id="hatch" patternUnits="userSpaceOnUse" width="7" height="7" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="7" stroke="#d6d6d0" stroke-width="1.6" /></pattern></defs>
@@ -303,8 +322,9 @@ function Karta({ z, plan, s, M }) {
   const f = s.formatka, A = plan.arkusz, T = z.technologie;
   const g = grainInFormatka(plan, s);
   const kroki = [];
-  kroki.push([`Arkusz ${A.w} × ${A.h} mm, włókno ∥ boku ${A.grain === "x" ? A.w : A.h} mm — obciąć krawędzie po ${M.gilotyna.obciecieArkusza} mm`, `${s.arkuszy} ark.`]);
-  if (!f.netto) kroki.push([`Pociąć na formatki ${mm(f.w)} × ${mm(f.h)} mm (${s.formatek.naArkusz} z arkusza${s.uklad.some((p) => p.rot) && s.uklad.some((p) => !p.rot) ? ", w dwóch orientacjach" : ""}); włókno ∥ boku ${mm(bokWlokna(f.w, f.h, g))} mm`, `${s.ciecia.arkusz} cięć / stos`]);
+  const bezCiecia = s.ciecia.arkusz === 0;
+  kroki.push([`Arkusz ${A.w} × ${A.h} mm, włókno ∥ boku ${A.grain === "x" ? A.w : A.h} mm${bezCiecia ? " — drukujemy na całym arkuszu" : ` — obciąć krawędzie po ${M.gilotyna.obciecieArkusza} mm`}`, `${s.arkuszy} ark.`]);
+  if (!f.netto && !bezCiecia) kroki.push([`Pociąć na formatki ${mm(f.w)} × ${mm(f.h)} mm (${s.formatek.naArkusz} z arkusza${s.uklad.some((p) => p.rot) && s.uklad.some((p) => !p.rot) ? ", w dwóch orientacjach" : ""}); włókno ∥ boku ${mm(bokWlokna(f.w, f.h, g))} mm`, `${s.ciecia.arkusz} cięć / stos`]);
   if (T.cyfra.on && s.cyfra) kroki.push([`${M.cyfra.nazwa}: krawędź wiodąca ${mm(s.cyfra.krawedz)} mm, przebieg ${mm(s.cyfra.dlugosc)} mm${s.cyfra.bypass ? " — bypass" : z.papier.gram > M.cyfra.gramMaxSzuflady ? " — bypass / OHCF" : ""}`, `${s.formatek.zArkuszy} przel.`]);
   if (T.sito.on) kroki.push([`Sitodruk na formatce (${f.uzytkow} uż.), ${T.sito.rodzaj.toLowerCase()}`, `${s.formatek.zArkuszy * (T.sito.ustawien || 1)} przel.`]);
   if (T.kaszerowanie.on) kroki.push([`Kaszerowanie formatek ${mm(f.w)} × ${mm(f.h)} mm (papier 1 + papier 2)`, `${s.formatek.zArkuszy} kanapek`]);
@@ -324,71 +344,54 @@ function Karta({ z, plan, s, M }) {
 function Macierz({ cmp, sel, setSel, all, setAll }) {
   const wyr = wyroznione(cmp);
   const rows = all ? cmp.lista.map((s) => ({ s, role: wyr.find((w) => w.s === s)?.role || [] })) : wyr;
-  // „Wszystkie” bez ręcznego na liście? dopisz go na górze, żeby był zawsze widoczny
-  if (all && cmp.reczny && !rows.some((r) => r.s === cmp.reczny)) rows.unshift({ s: cmp.reczny, role: ["ręczny"] });
+  // wybrana formatka zawsze na górze listy
+  if (all && cmp.wybrana) { const i = rows.findIndex((r) => r.s === cmp.wybrana); const [w] = rows.splice(i, 1); rows.unshift(w); }
   const best = cmp.best;
   return html`<table class="tbl">
     <thead><tr><th>Formatka</th><th>Z arkusza</th><th>Arkuszy</th><th>Formatek</th><th>Cięć</th><th>Papier</th><th>Netto</th><th>Różnica</th></tr></thead>
     <tbody>${rows.map(({ s, role }) => html`<tr class=${s.id === sel ? "is--on" : ""} onClick=${() => setSel(s.id)}>
-      <td>${role.map((r) => html`<span class=${`tag${r === "najtańszy" ? " is--best" : r === "ręczny" ? " is--manual" : ""}`}>${r}</span>`)}<span>${mm(s.formatka.w)} × ${mm(s.formatka.h)}</span>
-        <small>${s.formatka.netto ? "cięcie od razu na netto" : `${s.formatka.nx} × ${s.formatka.ny} = ${s.formatka.uzytkow} uż.`}${s.cyfra?.bypass ? " · bypass" : ""}</small></td>
+      <td>${role.map((r) => html`<span class=${`tag${r === "najtańsza sugestia" ? " is--best" : r === "wybrana" ? " is--manual" : ""}`}>${r}</span>`)}<span>${mm(s.formatka.w)} × ${mm(s.formatka.h)}</span>
+        <small>${s.wybrana ? `${s.formatka.wlokno === "dlugie" ? "LG" : "SG"} · ` : ""}${s.formatka.netto ? "cięcie od razu na netto" : `${s.formatka.nx} × ${s.formatka.ny} = ${s.formatka.uzytkow} uż.`}${s.cyfra?.bypass ? " · bypass" : ""}</small></td>
       <td>${s.formatek.naArkusz} × ${s.formatka.uzytkow}<small>${s.uzytkiNaArkusz} uż. · ${pct(s.wykorzystanie)}</small></td>
       <td>${s.arkuszy}</td>
       <td>${s.formatek.zArkuszy}</td>
       <td>${s.ciecia.arkusz + s.ciecia.formatka}<small>${s.ciecia.stosyArkusz + s.ciecia.stosyFormatka > 2 ? `stosy ${s.ciecia.stosyArkusz} + ${s.ciecia.stosyFormatka}` : "1 stos"}</small></td>
       <td>${zl(s.wycena.papier)}</td>
       <td><b>${zl(s.wycena.netto)}</b></td>
-      <td><span class=${`delta${s.roznica > 0 ? " is--plus" : ""}`}>${s.id === best.id ? "—" : signed(s.roznica, " zł", (v) => fmtZl.format(v))}</span></td>
+      <td><span class=${`delta${s.roznica > 0 ? " is--plus" : ""}`}>${s.id === best.id || !s.roznica ? "—" : signed(s.roznica, " zł", (v) => fmtZl.format(v))}</span></td>
     </tr>`)}</tbody>
   </table>
   <p class="note" style="margin-top:10px">${all ? html`Wszystkie warianty: ${cmp.lista.length}. ` : ""}<button class="link" onClick=${() => setAll(!all)}>${all ? "Pokaż tylko wyróżnione" : `Pokaż wszystkie (${cmp.lista.length})`}</button></p>`;
 }
-// Opis kompromisu wybranego wariantu względem standardu SRA3+ (punkt odniesienia z arkusza)
-function Kompromis({ s, cmp }) {
-  if (s.reczny && cmp.best) {
-    const d = { netto: Math.round((s.wycena.netto - cmp.best.wycena.netto) * 100) / 100, arkuszy: s.arkuszy - cmp.best.arkuszy, formatek: s.formatek.zArkuszy - cmp.best.formatek.zArkuszy };
-    return html`<div class="tradeoff"><b>Wariant ręczny względem najtańszej sugestii</b>
-      <span>${[d.arkuszy && `${signed(d.arkuszy)} ark. bazowych`, d.formatek && `${signed(d.formatek)} formatek`].filter(Boolean).join(" · ") || "ta sama liczba arkuszy i formatek"} → <span class=${`delta ${d.netto > 0 ? "is--plus" : d.netto < 0 ? "is--minus" : ""}`}>${signed(d.netto, " zł", (v) => fmtZl.format(v))} netto</span></span></div>`;
-  }
-  const d = s.wzgledemStandardu;
-  if (!d || s === cmp.ref) return cmp.ref ? null : html`<div class="tradeoff"><span>Standardowa formatka SRA3+ nie przechodzi przy tych ustawieniach (format, włókno lub stacje) — porównanie z najtańszym wariantem.</span></div>`;
-  const parts = [];
-  if (d.arkuszy) parts.push(`${signed(d.arkuszy)} ark. bazowych`);
-  if (d.formatek) parts.push(`${signed(d.formatek)} formatek (${d.formatek > 0 ? "więcej przelotów i pracy ręcznej" : "mniej przelotów i pracy ręcznej"})`);
-  return html`<div class="tradeoff"><b>Względem standardowej formatki SRA3+ 330 × 488</b>
-    <span>${parts.join(" · ") || "ta sama liczba arkuszy i formatek"} → <span class=${`delta ${d.netto > 0 ? "is--plus" : d.netto < 0 ? "is--minus" : ""}`}>${signed(d.netto, " zł", (v) => fmtZl.format(v))} netto</span></span></div>`;
+// Opis kompromisu: wskazana formatka względem najtańszej sugestii (z przyciskiem „przyjmij”), sugestia względem wskazanej
+function Kompromis({ s, cmp, przyjmij }) {
+  const ref = cmp.wybrana && s !== cmp.wybrana ? cmp.wybrana : !cmp.wybrana && s !== cmp.best ? cmp.best : s.wybrana && cmp.best ? cmp.best : null;
+  if (!ref) return null;
+  const d = { netto: Math.round((s.wycena.netto - ref.wycena.netto) * 100) / 100, arkuszy: s.arkuszy - ref.arkuszy, formatek: s.formatek.zArkuszy - ref.formatek.zArkuszy };
+  const parts = [d.arkuszy && `${signed(d.arkuszy)} ark. bazowych`, d.formatek && `${signed(d.formatek)} formatek (${d.formatek > 0 ? "więcej przelotów i pracy ręcznej" : "mniej przelotów i pracy ręcznej"})`].filter(Boolean);
+  const kto = s.wybrana ? "Wskazana formatka względem najtańszej sugestii" : cmp.wybrana ? "Ta sugestia względem wskazanej formatki" : "Ten wariant względem najtańszego";
+  return html`<div class="tradeoff"><b>${kto}</b>
+    <span>${parts.join(" · ") || "ta sama liczba arkuszy i formatek"} → <span class=${`delta ${d.netto > 0 ? "is--plus" : d.netto < 0 ? "is--minus" : ""}`}>${signed(d.netto, " zł", (v) => fmtZl.format(v))} netto</span></span>
+    ${!s.wybrana && html`<span><button class="btn" style="margin-top:6px" onClick=${() => przyjmij(s)}>Przyjmij jako formatkę do druku</button></span>`}
+    ${s.wybrana && cmp.best && d.netto > 0 && html`<span><button class="btn" style="margin-top:6px" onClick=${() => przyjmij(cmp.best)}>Przyjmij najtańszą sugestię (${mm(cmp.best.formatka.w)} × ${mm(cmp.best.formatka.h)})</button></span>`}
+  </div>`;
 }
 
 function Podglad({ z, up, M, C }) {
   const plan = useMemo(() => planuj(z, M, WYCINKA), [z, M]);
-  const rec = useMemo(() => (z.reczny.on ? wariantReczny(z, M, plan, z.reczny, WYCINKA) : null), [z, M, plan]);
-  const cmp = useMemo(() => porownaj(z, plan, C, rec), [z, plan, C, rec]);
+  const F = z.formatka;
+  const wyb = useMemo(() => (F.tryb === "wybrana" ? wariantFormatki(z, M, plan, { ...F, nx: F.siatka ? F.nx : 0, ny: F.siatka ? F.ny : 0, urot: F.siatka ? F.urot : "auto" }, WYCINKA) : null), [z, M, plan]);
+  const cmp = useMemo(() => porownaj(z, plan, C, wyb), [z, plan, C, wyb]);
   const [sel, setSel] = useState(null);
   const [all, setAll] = useState(false);
-  const s = (z.reczny.on && !sel ? cmp.reczny : null) || cmp.lista.find((x) => x.id === sel) || cmp.reczny || cmp.best;
-  // „Edytuj ręcznie”: przejmij parametry wybranego wariantu jako punkt wyjścia
-  const przejmij = (x) => { up((n) => { n.reczny = { on: true, nx: x.formatka.nx, ny: x.formatka.ny, urot: x.formatka.uw !== z.uzytek.w, fw: x.formatka.standard ? x.formatka.w : 0, fh: x.formatka.standard ? x.formatka.h : 0,
-    // orientacja jak w przejmowanym wariancie — „mieszane” tylko gdy sugestia sama mieszała
-    orient: x.uklad.every((p) => !p.rot) ? "pion" : x.uklad.every((p) => p.rot) ? "poziom" : "auto" }; }); setSel(null); };
-  const R = z.reczny, setR = (patch) => { up((n) => { Object.assign(n.reczny, patch); }); setSel(null); };
-  const reczne = html`<div class="manual">
-    <div class="manual__head">
-      <${Seg} value=${R.on ? "r" : "s"} options=${[["s", "Sugerowany"], ["r", "Ręczny"]]} onChange=${(v) => (v === "r" ? (s && !s.reczny ? przejmij(s) : setR({ on: true })) : (setR({ on: false }), setSel(null)))} />
-      <span class="note">${R.on ? "Zmieniasz podział sam — kalkulator przelicza i ostrzega, ale nie blokuje." : "Kalkulator dobiera podział sam. „Ręczny” przejmie wybrany wariant do edycji."}</span>
-    </div>
-    ${R.on && html`<div class="manual__grid">
-      <${Num} label="Użytki w poziomie" value=${R.nx} min=${1} onChange=${(v) => setR({ nx: Math.max(1, Math.round(v)) })} />
-      <${Num} label="Użytki w pionie" value=${R.ny} min=${1} onChange=${(v) => setR({ ny: Math.max(1, Math.round(v)) })} />
-      <${Num} label="Formatka A" unit="mm" value=${R.fw} hint="0 = ciasno" onChange=${(v) => setR({ fw: v })} />
-      <${Num} label="Formatka B" unit="mm" value=${R.fh} hint="0 = ciasno" onChange=${(v) => setR({ fh: v })} />
-      <${Seg} label="Użytek" value=${R.urot ? "r" : "n"} options=${[["n", `${mm(z.uzytek.w)} × ${mm(z.uzytek.h)}`], ["r", "obrócony"]]} onChange=${(v) => setR({ urot: v === "r" })} />
-      <${Seg} label="Formatki na arkuszu" value=${R.orient} options=${[["auto", "Mieszane"], ["pion", "Pion"], ["poziom", "Poziom"]]} onChange=${(v) => setR({ orient: v })} />
-    </div>`}
-    ${R.on && rec?.ostrzezenia?.length > 0 && html`<div class="warn">${rec.ostrzezenia.map((o) => html`<span>${o}</span>`)}</div>`}
-  </div>`;
+  useEffect(() => setSel(null), [F.tryb, F.w, F.h, F.wlokno]);
+  const s = cmp.lista.find((x) => x.id === sel) || cmp.wybrana || cmp.best;
+  // „Przyjmij”: sugestia kalkulatora staje się wskazaną formatką (wymiar + włókno)
+  const przyjmij = (x) => { up((n) => { const fm = FORMATKI.find((f) => (f[2] === x.formatka.w && f[3] === x.formatka.h) || (f[2] === x.formatka.h && f[3] === x.formatka.w)); n.formatka = { ...n.formatka, tryb: "wybrana", format: fm ? fm[0] : "inna", w: x.formatka.w, h: x.formatka.h, wlokno: wloknoFormatki(plan, x), siatka: false, nx: 0, ny: 0, urot: "auto" }; }); setSel(null); };
   const wyr = wyroznione(cmp);
+  const ostrz = wyb && (wyb.pusty || wyb.ostrzezenia?.length) ? html`<div class="warn">${wyb.ostrzezenia.map((o) => html`<span>${o}</span>`)}</div>` : null;
   if (!s) return html`<div class="preview"><div class="preview__bar"><span class="preview__info">Brak wariantu</span></div>
-    <div class="preview__scroll">${reczne}<div class="warn"><b>Żaden podział arkusza nie spełnia warunków.</b>
+    <div class="preview__scroll">${ostrz}<div class="warn"><b>Żaden podział arkusza nie spełnia warunków.</b>
     <span>Sprawdź: format użytku względem maszyn (${M.cyfra.nazwa} maks. ${M.cyfra.krawedzMax} × ${z.pozwolBypass ? M.cyfra.dlugoscMaxBypass : M.cyfra.dlugoscMax} mm${z.technologie.kaszerowanie.on ? `, kaszerowanie maks. ${M.kaszerowanie.maxA} × ${M.kaszerowanie.maxB} mm` : ""}), wymóg włókna produktu i włókno arkusza. Przy kartonie od ${M.cyfra.progWloknaGram} g włókno musi biec wzdłuż krawędzi wiodącej.</span></div></div></div>`;
   const g = grainInFormatka(plan, s);
   const w = s.wycena;
@@ -401,7 +404,7 @@ function Podglad({ z, up, M, C }) {
       <div class="card">
         <div class="card__head"><span class="card__title">Rzut cięcia</span><span class="card__sub">arkusz → formatka → użytek</span></div>
         <div class="card__body">
-          ${reczne}
+          ${s.wybrana && ostrz && html`<div style="margin-bottom:16px">${ostrz}</div>`}
           <div class="flow">
             <figure><${ArkuszSVG} plan=${plan} s=${s} M=${M} />
               <figcaption><span><b>Arkusz ${plan.arkusz.w} × ${plan.arkusz.h}</b> · ${s.formatek.naArkusz} formatek</span><span>${s.uzytkiNaArkusz} uż. · wykorzystanie ${pct(s.wykorzystanie)}</span></figcaption></figure>
@@ -414,7 +417,7 @@ function Podglad({ z, up, M, C }) {
 
       <div class="card">
         <div class="card__head"><span class="card__title">Warianty cięcia</span><span class="card__sub">kliknij wiersz, aby zobaczyć rzut</span></div>
-        <div class="card__body"><${Macierz} cmp=${cmp} sel=${s.id} setSel=${setSel} all=${all} setAll=${setAll} /><${Kompromis} s=${s} cmp=${cmp} /></div>
+        <div class="card__body"><${Macierz} cmp=${cmp} sel=${s.id} setSel=${setSel} all=${all} setAll=${setAll} /><${Kompromis} s=${s} cmp=${cmp} przyjmij=${przyjmij} plan=${plan} /></div>
       </div>
 
       <div class="card">
