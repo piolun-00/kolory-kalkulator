@@ -12,7 +12,7 @@ import htm from "htm";
 import { MASZYNY, CENNIK, PAPIER_FORMATY, WYCINKA } from "../engine/config.js";
 import { planuj, wariantFormatki, wloknoFormatki } from "../engine/cut.js";
 import { porownaj, wyroznione, cenaArkusza } from "../engine/pricing.js";
-import { bazaStartowa, sprawdz, stanMagazynu, stanBufora, pozycjeBufora, utworzZlecenie, przyjmijDostawe, zakonczZlecenie, anulujZlecenie, przyjmij, korekta, dodajPapier, filtruj, kluczFormatu, listaBufora, statusPozycji, oznaczZamowione, cofnijZamowienie, ustawDostawce, STATUSY_BUFORA } from "../engine/magazyn.js";
+import { bazaStartowa, sprawdz, stanMagazynu, stanBufora, pozycjeBufora, utworzZlecenie, przyjmijDostawe, zakonczZlecenie, anulujZlecenie, przyjmij, korekta, dodajPapier, edytujPapier, filtruj, kluczFormatu, listaBufora, statusPozycji, oznaczZamowione, cofnijZamowienie, ustawDostawce, STATUSY_BUFORA } from "../engine/magazyn.js";
 import { PAPIERY_PRZYKLADOWE, STANY_STARTOWE, TYPY_PAPIERU } from "../engine/papiery.js";
 
 const html = htm.bind(h);
@@ -137,8 +137,8 @@ function Tech({ label, t, set, note, children }) {
 // ===== Papier z kartoteki =====
 // Wpisujesz nazwę albo wybierasz z listy (datalist); wybór z kartoteki uzupełnia gramaturę, grubość, cenę, format i włókno.
 const etykietaPapieru = (p) => `${p.nazwa} · ${Math.min(p.a, p.b)}×${Math.max(p.a, p.b)} ${p.wlokno === "dlugie" ? "LG" : "SG"}`;
-function wstawPapier(x, klucz, p) {
-  x[klucz] = { ...x[klucz], id: p.id, nazwa: p.nazwa, gram: p.gram, mikrony: p.mikrony, cenaDostawcy: p.cenaDostawcy, cenaLicze: 0 };
+function wstawPapier(x, klucz, p, zachowajLicze = false) {
+  x[klucz] = { ...x[klucz], id: p.id, nazwa: p.nazwa, gram: p.gram, mikrony: p.mikrony, cenaDostawcy: p.cenaDostawcy, cenaLicze: zachowajLicze ? x[klucz].cenaLicze : 0 };
   if (klucz === "papier") {
     const f = PAPIER_FORMATY.find((q) => (q.a === p.a && q.b === p.b) || (q.a === p.b && q.b === p.a));
     x.arkusz = { ...x.arkusz, format: f && f.id !== "inny" ? f.id : "inny", a: p.a, b: p.b, wlokno: p.wlokno };
@@ -164,7 +164,7 @@ function PapierPicker({ label, db, value, onText, onPick }) {
 }
 
 // ===== Formularz zlecenia =====
-function Zlecenie({ z, up, M, C, db }) {
+function Zlecenie({ z, up, M, C, db, edytujWKartotece }) {
   const [open, setOpen] = useState(() => ({ produkt: true, drukowy: true, papier: true, druk: true, wyk: false, ...store.get("kk.groups", {}) }));
   const tg = (k) => () => { const n = { ...open, [k]: !open[k] }; setOpen(n); store.set("kk.groups", n); };
   const T = z.technologie;
@@ -175,6 +175,8 @@ function Zlecenie({ z, up, M, C, db }) {
   const wykList = ["kaszerowanie", "sztancowanie", "foliowanie", "bigowanie", "barwienie", "rozkowanie", "laser", "ploter", "oczkowanie", "blona", "szycie", "nfc", "wiercenie", "edycja"].filter((k) => T[k]?.on);
   const ciezki = z.papier.gram >= M.cyfra.progWloknaGram;
   const F = z.formatka, setF = (patch) => up((x) => { Object.assign(x.formatka, patch); });
+  const kart1 = z.papier.id && db.papiery.find((p) => p.id === z.papier.id);
+  const kart2 = z.papier2.id && db.papiery.find((p) => p.id === z.papier2.id);
 
   // Kolejność jak w pracy drukarni: 1 użytek → 2 arkusz, z którego drukuję → 3 arkusz, który kupuję i tnę → technologia
   return html`<div class="panel__inner">
@@ -227,32 +229,49 @@ function Zlecenie({ z, up, M, C, db }) {
 
     <${Group} id="papier" title="3  Arkusz, który kupuję i tnę" open=${open.papier} toggle=${tg("papier")}
       summary=${`${fmt.id === "inny" ? `${z.arkusz.a} × ${z.arkusz.b}` : fmt.nazwa} · ${z.arkusz.wlokno === "dlugie" ? "LG" : "SG"} · ${z.papier.gram} g · ${zl(cena1)}`}>
-      <${Sel} label="Format" value=${z.arkusz.format} options=${PAPIER_FORMATY.map((f) => [f.id, f.nazwa])}
-        onChange=${(v) => up((x) => { const f = PAPIER_FORMATY.find((p) => p.id === v); x.arkusz.format = v; if (v !== "inny") { x.arkusz.a = f.a; x.arkusz.b = f.b; } })} />
-      ${z.arkusz.format === "inny" && html`<div class="grid2">
-        <${Num} label="Bok A" unit="mm" value=${z.arkusz.a} onChange=${(v) => up((x) => { x.arkusz.a = v; })} />
-        <${Num} label="Bok B" unit="mm" value=${z.arkusz.b} onChange=${(v) => up((x) => { x.arkusz.b = v; })} />
-      </div>`}
-      <${Seg} label="Włókno" value=${z.arkusz.wlokno} onChange=${(v) => up((x) => { x.arkusz.wlokno = v; })}
-        options=${[["dlugie", "Długie (LG)"], ["krotkie", "Krótkie (SG)"]]}
-        hint=${`Włókno równoległe do ${z.arkusz.wlokno === "dlugie" ? "dłuższego" : "krótszego"} boku. Papiery ozdobne B1 — najczęściej długie. Jeśli kupujesz od razu arkusz drukowy (np. SRA3+), wybierz ten sam format co w punkcie 2.`} />
       <${PapierPicker} label="Papier" db=${db} value=${z.papier} onText=${(v) => up((x) => { x.papier.nazwa = v; x.papier.id = null; })} onPick=${(p) => up((x) => wstawPapier(x, "papier", p))} />
-      <div class="grid3">
-        <${Num} label="Gramatura" unit="g" value=${z.papier.gram} onChange=${(v) => up((x) => { x.papier.gram = v; })} />
-        <${Grubosc} value=${z.papier.mikrony} onChange=${(v) => up((x) => { x.papier.mikrony = v; })} />
-        <${Num} label="Zwyżka" unit="ark." value=${z.zwyzkaArkuszy} onChange=${(v) => up((x) => { x.zwyzkaArkuszy = Math.round(v); })} />
-      </div>
-      <div class="grid2">
-        <${Num} label="Cena dostawcy / ark." unit="zł" value=${z.papier.cenaDostawcy} onChange=${(v) => up((x) => { x.papier.cenaDostawcy = v; })} hint=${`z marżą ${pct(C.marzaPapier)}: ${zl(z.papier.cenaDostawcy * (1 + C.marzaPapier))}`} />
-        <${Num} label="Liczę po" unit="zł" value=${z.papier.cenaLicze} onChange=${(v) => up((x) => { x.papier.cenaLicze = v; })} hint="0 = cena z marżą" />
-      </div>
+      ${kart1 ? html`
+        <!-- Papier z kartoteki: dane stałe — zmienia się je w kartotece, wycena przelicza się sama -->
+        <div class="ro">
+          <div><span>Format</span><b>${Math.min(kart1.a, kart1.b)} × ${Math.max(kart1.a, kart1.b)}</b></div>
+          <div><span>Włókno</span><b>${kart1.wlokno === "dlugie" ? "długie (LG)" : "krótkie (SG)"}</b></div>
+          <div><span>Gramatura</span><b>${kart1.gram} g</b></div>
+          <div><span>Grubość</span><b>${grub(kart1.mikrony)}</b></div>
+          <div><span>Cena dostawcy</span><b>${zl(kart1.cenaDostawcy)}</b></div>
+          <div><span>Z marżą ${pct(C.marzaPapier)}</span><b>${zl(kart1.cenaDostawcy * (1 + C.marzaPapier))}</b></div>
+        </div>
+        <p class="f__hint">Dane z kartoteki — stałe w wycenie. <button class="link" onClick=${() => edytujWKartotece(kart1.id)}>Zmień w kartotece</button></p>
+        <div class="grid2">
+          <${Num} label="Zwyżka" unit="ark." value=${z.zwyzkaArkuszy} onChange=${(v) => up((x) => { x.zwyzkaArkuszy = Math.round(v); })} />
+          <${Num} label="Liczę po" unit="zł" value=${z.papier.cenaLicze} onChange=${(v) => up((x) => { x.papier.cenaLicze = v; })} hint="0 = cena z marżą" />
+        </div>`
+      : html`
+        <${Sel} label="Format" value=${z.arkusz.format} options=${PAPIER_FORMATY.map((f) => [f.id, f.nazwa])}
+          onChange=${(v) => up((x) => { const f = PAPIER_FORMATY.find((p) => p.id === v); x.arkusz.format = v; if (v !== "inny") { x.arkusz.a = f.a; x.arkusz.b = f.b; } })} />
+        ${z.arkusz.format === "inny" && html`<div class="grid2">
+          <${Num} label="Bok A" unit="mm" value=${z.arkusz.a} onChange=${(v) => up((x) => { x.arkusz.a = v; })} />
+          <${Num} label="Bok B" unit="mm" value=${z.arkusz.b} onChange=${(v) => up((x) => { x.arkusz.b = v; })} />
+        </div>`}
+        <${Seg} label="Włókno" value=${z.arkusz.wlokno} onChange=${(v) => up((x) => { x.arkusz.wlokno = v; })}
+          options=${[["dlugie", "Długie (LG)"], ["krotkie", "Krótkie (SG)"]]}
+          hint=${`Włókno równoległe do ${z.arkusz.wlokno === "dlugie" ? "dłuższego" : "krótszego"} boku. Papiery ozdobne B1 — najczęściej długie. Jeśli kupujesz od razu arkusz drukowy (np. SRA3+), wybierz ten sam format co w punkcie 2.`} />
+        <div class="grid3">
+          <${Num} label="Gramatura" unit="g" value=${z.papier.gram} onChange=${(v) => up((x) => { x.papier.gram = v; })} />
+          <${Grubosc} value=${z.papier.mikrony} onChange=${(v) => up((x) => { x.papier.mikrony = v; })} />
+          <${Num} label="Zwyżka" unit="ark." value=${z.zwyzkaArkuszy} onChange=${(v) => up((x) => { x.zwyzkaArkuszy = Math.round(v); })} />
+        </div>
+        <div class="grid2">
+          <${Num} label="Cena dostawcy / ark." unit="zł" value=${z.papier.cenaDostawcy} onChange=${(v) => up((x) => { x.papier.cenaDostawcy = v; })} hint=${`z marżą ${pct(C.marzaPapier)}: ${zl(z.papier.cenaDostawcy * (1 + C.marzaPapier))}`} />
+          <${Num} label="Liczę po" unit="zł" value=${z.papier.cenaLicze} onChange=${(v) => up((x) => { x.papier.cenaLicze = v; })} hint="0 = cena z marżą" />
+        </div>`}
       ${T.cyfra.on && ciezki && html`<p class="f__hint">Od ${M.cyfra.progWloknaGram} g producenci zalecają na ${M.cyfra.nazwa} włókno wzdłuż krawędzi wiodącej (krótkie włókno na SRA3).</p>`}
       ${T.cyfra.on && z.papier.gram > M.cyfra.gramMaxSzuflady && z.papier.gram <= M.cyfra.gramMax && html`<p class="f__hint">Powyżej ${M.cyfra.gramMaxSzuflady} g tylko bypass lub podajnik OHCF${z.papier.gram > M.cyfra.gramMaxDupleks ? `; powyżej ${M.cyfra.gramMaxDupleks} g dupleks ręczny` : ""}.</p>`}
       ${T.cyfra.on && z.papier.gram > M.cyfra.gramMax && html`<p class="f__warn">${M.cyfra.nazwa} przyjmuje maks. ${M.cyfra.gramMax} g.</p>`}
       ${T.kaszerowanie.on && html`<div class="group__sub">Papier 2 (kaszerowanie)</div>
         <${PapierPicker} label="Papier 2" db=${db} value=${z.papier2} onText=${(v) => up((x) => { x.papier2.nazwa = v; x.papier2.id = null; })} onPick=${(p) => up((x) => wstawPapier(x, "papier2", p))} />
         <div class="grid2">
-          <${Num} label="Cena dostawcy / ark." unit="zł" value=${z.papier2.cenaDostawcy} onChange=${(v) => up((x) => { x.papier2.cenaDostawcy = v; })} />
+          ${kart2 ? html`<div class="ro is--one"><div><span>Cena dostawcy (kartoteka)</span><b>${zl(kart2.cenaDostawcy)}</b></div></div>`
+            : html`<${Num} label="Cena dostawcy / ark." unit="zł" value=${z.papier2.cenaDostawcy} onChange=${(v) => up((x) => { x.papier2.cenaDostawcy = v; })} />`}
           <${Num} label="Liczę po" unit="zł" value=${z.papier2.cenaLicze} onChange=${(v) => up((x) => { x.papier2.cenaLicze = v; })} />
         </div>`}
     </${Group}>
@@ -632,7 +651,7 @@ function ZleceniePodglad({ db, setDb, id }) {
 }
 
 // ===== Magazyn =====
-function MagazynPanel({ db, setDb, f, setF, seg, setSeg, reset }) {
+function MagazynPanel({ db, setDb, f, setF, seg, setSeg, reset, edytuj, setEdytuj }) {
   const formaty = [...new Set(db.papiery.map(kluczFormatu))].sort();
   const kolory = [...new Set(db.papiery.map((p) => p.kolor).filter(Boolean))].sort();
   const pusty = { nazwa: "", producent: "", dostawca: "", kolor: "", gram: 300, mikrony: 400, typ: "gładki", a: 700, b: 1000, wlokno: "dlugie", cenaDostawcy: 0, ilosc: 0 };
@@ -640,6 +659,17 @@ function MagazynPanel({ db, setDb, f, setF, seg, setSeg, reset }) {
   const [open, setOpen] = useState(false);
   const [pytaj, setPytaj] = useState(false);
   const setN = (k) => (v) => setNowy({ ...nowy, [k]: v });
+  // Edycja papieru z kartoteki: formularz wypełnia się danymi wybranego papieru
+  useEffect(() => {
+    const p = edytuj && db.papiery.find((q) => q.id === edytuj);
+    if (p) { setNowy({ ...pusty, ...p, ilosc: 0 }); setOpen(true); }
+  }, [edytuj]);
+  const zapiszEdycje = () => {
+    if (!nowy.nazwa.trim()) return;
+    const { ilosc, id, ...p } = nowy;
+    setDb(edytujPapier(db, edytuj, p)); setEdytuj(null); setNowy(pusty); setOpen(false);
+  };
+  const anulujEdycje = () => { setEdytuj(null); setNowy(pusty); setOpen(false); };
   const dodaj = () => {
     if (!nowy.nazwa.trim()) return;
     const { ilosc, ...p } = nowy;
@@ -673,7 +703,7 @@ function MagazynPanel({ db, setDb, f, setF, seg, setSeg, reset }) {
         <div class="f"><span class="f__label">Typ</span><div class="chips">${TYPY_PAPIERU.map((t) => html`<button aria-pressed=${typy.includes(t)} onClick=${() => setF({ ...f, typy: typy.includes(t) ? typy.filter((x) => x !== t) : [...typy, t] })}>${t}</button>`)}</div></div>
         ${seg === "magazyn" && html`<${Check} label="Ukryj papiery bez stanu" checked=${!!f.ukryjZera} onChange=${(v) => setF({ ...f, ukryjZera: v })} />`}
       </div></section>
-    <${Group} id="nowy" title="Dodaj papier do kartoteki" open=${open} toggle=${() => setOpen(!open)} summary="">
+    <${Group} id="nowy" title=${edytuj ? "Edytuj papier w kartotece" : "Dodaj papier do kartoteki"} open=${open} toggle=${() => (edytuj ? anulujEdycje() : setOpen(!open))} summary=${edytuj ? "zmiana przelicza otwartą wycenę" : ""}>
       <${Txt} label="Nazwa" value=${nowy.nazwa} placeholder="np. Keaykolour Jet Black 300 g" onChange=${setN("nazwa")} />
       <div class="grid3">
         <${Txt} label="Producent" value=${nowy.producent} onChange=${setN("producent")} />
@@ -691,13 +721,17 @@ function MagazynPanel({ db, setDb, f, setF, seg, setSeg, reset }) {
         <${Num} label="Cena / ark." unit="zł" value=${nowy.cenaDostawcy} onChange=${setN("cenaDostawcy")} />
       </div>
       <${Seg} label="Włókno" value=${nowy.wlokno} options=${[["dlugie", "Długie (LG)"], ["krotkie", "Krótkie (SG)"]]} onChange=${setN("wlokno")} />
-      <${Num} label="Na stanie od razu" unit="ark." value=${nowy.ilosc} onChange=${setN("ilosc")} hint="Trafi do magazynu wewnętrznego." />
-      <button class="btn is--primary" onClick=${dodaj} disabled=${!nowy.nazwa.trim()}>Dodaj do kartoteki</button>
+      ${edytuj ? html`<div class="actions" style="margin-top:0">
+          <button class="btn is--primary" onClick=${zapiszEdycje} disabled=${!nowy.nazwa.trim()}>Zapisz zmiany</button>
+          <button class="btn" onClick=${anulujEdycje}>Anuluj</button>
+          <span class="note">Stan magazynu zmieniasz w tabeli (+N / −N), nie tutaj.</span></div>`
+        : html`<${Num} label="Na stanie od razu" unit="ark." value=${nowy.ilosc} onChange=${setN("ilosc")} hint="Trafi do magazynu wewnętrznego." />
+      <button class="btn is--primary" onClick=${dodaj} disabled=${!nowy.nazwa.trim()}>Dodaj do kartoteki</button>`}
     </${Group}>
     <p class="note">Dane zapisują się na razie w tej przeglądarce. <button class="link" onClick=${() => { if (!pytaj) { setPytaj(true); setTimeout(() => setPytaj(false), 4000); return; } reset(); setPytaj(false); }}>${pytaj ? "Kliknij ponownie — wszystkie stany i zlecenia wrócą do przykładu" : "Przywróć dane przykładowe"}</button></p>
   </div>`;
 }
-function MagazynPodglad({ db, setDb, f, seg, otworzZlecenie }) {
+function MagazynPodglad({ db, setDb, f, seg, otworzZlecenie, edytuj, setEdytuj }) {
   const [ruch_, setRuch] = useState({});
   const P = db.papiery;
   if (seg === "bufor") {
@@ -729,8 +763,8 @@ function MagazynPodglad({ db, setDb, f, seg, otworzZlecenie }) {
   return html`<div class="preview"><div class="preview__bar"><b>Magazyn wewnętrzny</b><span class="preview__info">${lista.length} papierów · ${naStanie} na stanie · ${suma} ark.</span></div>
     <div class="preview__scroll"><div class="card"><div class="card__body">
       ${lista.length ? html`<table class="tbl is--static"><thead><tr><th>Papier</th><th>Format</th><th>Gramatura</th><th>Typ</th><th>Dostawca</th><th>Cena / ark.</th><th>Stan</th><th>Przyjęcie / korekta</th></tr></thead>
-        <tbody>${lista.map((p) => { const stn = stanMagazynu(db, p.id); return html`<tr class=${stn > 0 ? "" : "is--zero"}>
-          <td>${p.nazwa}<small>${p.kolor || "—"} · ${p.producent || ""}</small></td>
+        <tbody>${lista.map((p) => { const stn = stanMagazynu(db, p.id); return html`<tr class=${`${stn > 0 ? "" : "is--zero"}${edytuj === p.id ? " is--on" : ""}`}>
+          <td><button class="link is--name" title="Edytuj dane papieru" onClick=${() => setEdytuj(p.id)}>${p.nazwa}</button><small>${p.kolor || "—"} · ${p.producent || ""}</small></td>
           <td>${kluczFormatu(p).replace("x", " × ")}<small>${p.wlokno === "dlugie" ? "długie włókno" : "krótkie włókno"}</small></td>
           <td>${p.gram} g<small>${grub(p.mikrony)}</small></td><td>${p.typ}</td><td>${p.dostawca || "—"}</td><td>${zl(p.cenaDostawcy)}</td>
           <td><b>${stn}</b></td>
@@ -806,6 +840,13 @@ function App() {
   const [magSeg, setMagSegRaw] = useState("magazyn");
   const setMagSeg = (v) => setMagSegRaw(v === "kartoteka" ? "magazyn" : v);
   const otworzZlecenie = (id) => { setSelZl(id); setView("zlecenia"); };
+  const [magEdit, setMagEdit] = useState(null);
+  // Papier z kartoteki w wycenie trzyma dane kartoteki: zmiana w kartotece od razu przelicza wycenę
+  useEffect(() => {
+    const inne = (k) => { const p = z[k]?.id && db.papiery.find((q) => q.id === z[k].id); return p && (p.nazwa !== z[k].nazwa || p.gram !== z[k].gram || p.mikrony !== z[k].mikrony || p.cenaDostawcy !== z[k].cenaDostawcy || (k === "papier" && (p.a !== z.arkusz.a || p.b !== z.arkusz.b || p.wlokno !== z.arkusz.wlokno))) ? p : null; };
+    const p1 = inne("papier"), p2 = inne("papier2");
+    if (p1 || p2) up((x) => { if (p1) wstawPapier(x, "papier", p1, true); if (p2) wstawPapier(x, "papier2", p2, true); });
+  }, [db.papiery]);
   const aktywne = db.zlecenia.filter((x) => x.status === "w realizacji").length;
   const up = (fn) => setZ((prev) => { const n = clone(prev); fn(n); store.set("kk.zlecenie", n); return n; });
   const setM = (fn) => setMRaw((prev) => { const n = clone(prev); fn(n); store.set("kk.maszyny", n); return n; });
@@ -840,14 +881,14 @@ function App() {
       <p class="nav__note">Karta produkcyjna · Broszury · Wielki format · Offset · wspólna baza dla zespołu</p>
     </nav>
     <main class="panel">
-      ${view === "wycena" && html`<${Zlecenie} z=${z} up=${up} M=${M} C=${C} db=${db} />`}
+      ${view === "wycena" && html`<${Zlecenie} z=${z} up=${up} M=${M} C=${C} db=${db} edytujWKartotece=${(id) => { setMagEdit(id); setMagSeg("magazyn"); setView("magazyn"); }} />`}
       ${view === "maszyny" && html`<${Maszyny} M=${M} setM=${setM} reset=${() => { setMRaw(clone(MASZYNY)); store.set("kk.maszyny", null); }} />`}
       ${view === "cenniki" && html`<${Cenniki} C=${C} setC=${setC} reset=${() => { setCRaw(clone(CENNIK)); store.set("kk.cennik", null); }} />`}
       ${view === "zlecenia" && html`<${ZleceniaPanel} db=${db} sel=${selZl} setSel=${setSelZl} />`}
-      ${view === "magazyn" && html`<${MagazynPanel} db=${db} setDb=${setDb} f=${magF} setF=${setMagF} seg=${magSeg} setSeg=${setMagSeg} reset=${() => setDb(bazaStartowa(PAPIERY_PRZYKLADOWE, STANY_STARTOWE))} />`}
+      ${view === "magazyn" && html`<${MagazynPanel} db=${db} setDb=${setDb} f=${magF} setF=${setMagF} seg=${magSeg} setSeg=${setMagSeg} edytuj=${magEdit} setEdytuj=${setMagEdit} reset=${() => setDb(bazaStartowa(PAPIERY_PRZYKLADOWE, STANY_STARTOWE))} />`}
     </main>
     ${view === "zlecenia" ? html`<${ZleceniePodglad} db=${db} setDb=${setDb} id=${selZl} />`
-      : view === "magazyn" ? html`<${MagazynPodglad} db=${db} setDb=${setDb} f=${magF} seg=${magSeg} otworzZlecenie=${otworzZlecenie} />`
+      : view === "magazyn" ? html`<${MagazynPodglad} db=${db} setDb=${setDb} f=${magF} seg=${magSeg} otworzZlecenie=${otworzZlecenie} edytuj=${magEdit} setEdytuj=${setMagEdit} />`
       : html`<${Podglad} z=${z} up=${up} M=${M} C=${C} mag=${{ db, setDb, otworzZlecenie }} />`}
   </div>`;
 }

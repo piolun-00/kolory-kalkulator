@@ -1,7 +1,7 @@
 // Testy magazynu: przepływ magazyn wewnętrzny → bufor zlecenia → zwrot resztek.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { oznaczZamowione, cofnijZamowienie, ustawDostawce, listaBufora, statusPozycji, bazaStartowa, sprawdz, stanMagazynu, stanBufora, utworzZlecenie, przyjmijDostawe, zakonczZlecenie, anulujZlecenie, korekta, filtruj, pozycjeBufora } from "../engine/magazyn.js";
+import { edytujPapier, oznaczZamowione, cofnijZamowienie, ustawDostawce, listaBufora, statusPozycji, bazaStartowa, sprawdz, stanMagazynu, stanBufora, utworzZlecenie, przyjmijDostawe, zakonczZlecenie, anulujZlecenie, korekta, filtruj, pozycjeBufora } from "../engine/magazyn.js";
 import { PAPIERY_PRZYKLADOWE, STANY_STARTOWE } from "../engine/papiery.js";
 
 const start = () => bazaStartowa(PAPIERY_PRZYKLADOWE, STANY_STARTOWE);
@@ -86,4 +86,15 @@ test("Statusy bufora: do zamówienia → zamówiony → gotowy; z magazynu od ra
   const lb = listaBufora(db);
   assert.equal(lb.length, 2);
   assert.equal(lb[0].wBuforze, 50);
+});
+
+test("Edycja papieru w kartotece nie zmienia stanu ani historii", () => {
+  const db0 = start();
+  const db = edytujPapier(db0, JB, { cenaDostawcy: 11.2, mikrony: 440 });
+  const p = db.papiery.find((x) => x.id === JB);
+  assert.equal(p.cenaDostawcy, 11.2);
+  assert.equal(p.mikrony, 440);
+  assert.equal(p.nazwa, "Keaykolour Jet Black 300 g");
+  assert.equal(stanMagazynu(db, JB), 42);
+  assert.equal(db.ruchy.length, db0.ruchy.length);
 });
