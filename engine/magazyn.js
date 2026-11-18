@@ -82,19 +82,53 @@ export function utworzZlecenie(db, { nazwa, klient, pozycje, wycena = null }) {
       ruch(n, { segment: "magazyn", papierId: p.papierId, ilosc: -s.zMagazynu, typ: "rezerwacja", zlecenieId: id, opis: `Do bufora — ${numer}` });
       ruch(n, { segment: "bufor", papierId: p.papierId, ilosc: s.zMagazynu, typ: "rezerwacja", zlecenieId: id, opis: `Z magazynu wewnętrznego` });
     }
-    return { papierId: p.papierId, potrzeba: s.potrzeba, zMagazynu: s.zMagazynu, domowic: s.domowic, przyjeto: 0 };
+    const kart = n.papiery.find((q) => q.id === p.papierId);
+    return { papierId: p.papierId, potrzeba: s.potrzeba, zMagazynu: s.zMagazynu, domowic: s.domowic, przyjeto: 0,
+      dostawca: kart?.dostawca || "", status: s.domowic > 0 ? "do zamówienia" : "gotowy", zamowiono: null, dostarczono: null };
   });
   n.zlecenia.push({ id, numer, nazwa: nazwa || "", klient: klient || "", status: "w realizacji", utworzone: teraz(), pozycje: poz, wycena });
   return { db: n, id, numer };
 }
 
-// Dostawa domówionego papieru — prosto do bufora zlecenia
+// ===== Statusy pozycji bufora =====
+// do zamówienia → zamówiony → gotowy. Pozycja w całości z magazynu jest od razu „gotowa”.
+export const STATUSY_BUFORA = ["do zamówienia", "zamówiony", "gotowy"];
+export const statusPozycji = (p) => p.status || ((p.domowic || 0) - (p.przyjeto || 0) > 0 ? "do zamówienia" : "gotowy");
+const pozycja = (n, zlecenieId, papierId) => n.zlecenia.find((x) => x.id === zlecenieId)?.pozycje.find((x) => x.papierId === papierId);
+
+// Zmiana dostawcy dla pozycji (u kogo domawiamy)
+export function ustawDostawce(db, zlecenieId, papierId, dostawca) {
+  const n = kopia(db);
+  const p = pozycja(n, zlecenieId, papierId);
+  if (p) p.dostawca = dostawca;
+  return n;
+}
+// Zamówienie złożone u dostawcy
+export function oznaczZamowione(db, zlecenieId, papierId, dostawca) {
+  const n = kopia(db);
+  const p = pozycja(n, zlecenieId, papierId);
+  if (p && statusPozycji(p) === "do zamówienia") { p.status = "zamówiony"; p.zamowiono = teraz(); if (dostawca !== undefined) p.dostawca = dostawca; }
+  return n;
+}
+// Cofnięcie statusu „zamówiony” (pomyłka)
+export function cofnijZamowienie(db, zlecenieId, papierId) {
+  const n = kopia(db);
+  const p = pozycja(n, zlecenieId, papierId);
+  if (p && statusPozycji(p) === "zamówiony") { p.status = "do zamówienia"; p.zamowiono = null; }
+  return n;
+}
+
+// Dostawa domówionego papieru — prosto do bufora zlecenia; komplet → „gotowy”
 export function przyjmijDostawe(db, zlecenieId, papierId, ilosc) {
   const n = kopia(db);
   const z = n.zlecenia.find((x) => x.id === zlecenieId);
   if (!z) return n;
   const p = z.pozycje.find((x) => x.papierId === papierId);
-  if (p) p.przyjeto = (p.przyjeto || 0) + Math.round(ilosc);
+  if (p) {
+    p.przyjeto = (p.przyjeto || 0) + Math.round(ilosc);
+    if (p.przyjeto >= (p.domowic || 0)) { p.status = "gotowy"; p.dostarczono = teraz(); }
+    else if (statusPozycji(p) === "do zamówienia") { p.status = "zamówiony"; p.zamowiono = p.zamowiono || teraz(); }
+  }
   ruch(n, { segment: "bufor", papierId, ilosc: Math.round(ilosc), typ: "dostawa", zlecenieId, opis: `Dostawa — ${z.numer}` });
   return n;
 }
@@ -133,6 +167,14 @@ export function anulujZlecenie(db, zlecenieId) {
   }
   z.status = "anulowane";
   return n;
+}
+
+// Wszystkie pozycje bufora (zlecenia w realizacji) — lista zakupowa: ile z magazynu, ile domówić, u kogo, status
+export function listaBufora(db) {
+  const out = [];
+  for (const z of db.zlecenia) if (z.status === "w realizacji") for (const p of z.pozycje)
+    out.push({ zlecenie: z, poz: p, status: statusPozycji(p), wBuforze: stanBufora(db, z.id, p.papierId), brakuje: Math.max(0, (p.domowic || 0) - (p.przyjeto || 0)) });
+  return out;
 }
 
 // ===== Filtry kartoteki / magazynu =====

@@ -1,7 +1,7 @@
 // Testy magazynu: przepływ magazyn wewnętrzny → bufor zlecenia → zwrot resztek.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bazaStartowa, sprawdz, stanMagazynu, stanBufora, utworzZlecenie, przyjmijDostawe, zakonczZlecenie, anulujZlecenie, korekta, filtruj, pozycjeBufora } from "../engine/magazyn.js";
+import { oznaczZamowione, cofnijZamowienie, ustawDostawce, listaBufora, statusPozycji, bazaStartowa, sprawdz, stanMagazynu, stanBufora, utworzZlecenie, przyjmijDostawe, zakonczZlecenie, anulujZlecenie, korekta, filtruj, pozycjeBufora } from "../engine/magazyn.js";
 import { PAPIERY_PRZYKLADOWE, STANY_STARTOWE } from "../engine/papiery.js";
 
 const start = () => bazaStartowa(PAPIERY_PRZYKLADOWE, STANY_STARTOWE);
@@ -61,4 +61,27 @@ test("Filtry: nazwa, format, kolor, gramatura, typ, tylko na stanie", () => {
   assert.equal(filtruj(P, { gramMin: 300, gramMax: 300 }).length, 9);
   assert.equal(filtruj(P, { typy: ["gładki"] }).length, 2);
   assert.equal(filtruj(P, { tylkoNaStanie: true }, (id) => stanMagazynu(db, id)).length, 6);
+});
+
+test("Statusy bufora: do zamówienia → zamówiony → gotowy; z magazynu od razu gotowy", () => {
+  let { db, id } = utworzZlecenie(start(), { pozycje: [{ papierId: JB, potrzeba: 50 }, { papierId: "kk-navy-300", potrzeba: 5 }] });
+  const [jb, navy] = db.zlecenia[0].pozycje;
+  assert.equal(statusPozycji(jb), "do zamówienia");
+  assert.equal(jb.dostawca, "Antalis");
+  assert.equal(statusPozycji(navy), "gotowy");             // 8 w magazynie ≥ 5
+  db = ustawDostawce(db, id, JB, "Europapier");
+  db = oznaczZamowione(db, id, JB);
+  assert.equal(statusPozycji(db.zlecenia[0].pozycje[0]), "zamówiony");
+  db = cofnijZamowienie(db, id, JB);
+  assert.equal(statusPozycji(db.zlecenia[0].pozycje[0]), "do zamówienia");
+  db = oznaczZamowione(db, id, JB);
+  db = przyjmijDostawe(db, id, JB, 5);                       // częściowa dostawa — dalej zamówiony
+  assert.equal(statusPozycji(db.zlecenia[0].pozycje[0]), "zamówiony");
+  db = przyjmijDostawe(db, id, JB, 3);                       // komplet (8) — gotowy
+  const p = db.zlecenia[0].pozycje[0];
+  assert.equal(statusPozycji(p), "gotowy");
+  assert.equal(p.dostawca, "Europapier");
+  const lb = listaBufora(db);
+  assert.equal(lb.length, 2);
+  assert.equal(lb[0].wBuforze, 50);
 });
