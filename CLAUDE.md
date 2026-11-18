@@ -19,7 +19,12 @@ UI i komentarze po polsku. Styl i tokeny 1:1 z edytora brandmanuala (piolun-00/b
 - Formularz w kolejności pracy drukarni: 1 Użytek (netto + „Spady” = `z.rozcinka`, odstęp netto–netto 3 mm jak w arkuszu,
   NIE spad na stronę) → 2 Arkusz, z którego drukuję (formatka + włókno + `z.margines` 7 mm) → 3 Arkusz, który kupuję i tnę
   (format, włókno, papier, cena, zwyżka) → Technologia → Wykończenie. Spady 0 = jedno wspólne cięcie zamiast dwóch.
-- Dane: localStorage (`kk.zlecenie`, `kk.maszyny`, `kk.cennik`). Wspólna baza i konta dla Kolorów — następny etap.
+- Magazyn (`engine/magazyn.js`): dwa segmenty — magazyn wewnętrzny (resztki, zwyżki, zapas) i bufor (regał per zlecenie).
+  Stan = suma ruchów (przyjęcie, rezerwacja, dostawa, zużycie, zwrot, korekta, anulowanie) — nigdy nie nadpisujemy liczb.
+  Zlecenie z wyceny: papier z magazynu → bufor, brak → „domówić”; dostawa → bufor; zakończenie: „zostało +N” → magazyn,
+  reszta bufora = zużycie. Kartoteka przykładowa: Keaykolour (marka Antalis, nie Europapier) — ceny przykładowe.
+- Dane: localStorage (`kk.zlecenie`, `kk.maszyny`, `kk.cennik`, `kk.magazyn`). Magazyn MUSI trafić do wspólnej bazy
+  (inaczej każdy pracownik ma swój stan) — to najbliższy etap.
 - Pasek nowej wersji jak w brandmanualu (`version.json`, tylko gdy wersja na serwerze nowsza).
 
 ## Zasady

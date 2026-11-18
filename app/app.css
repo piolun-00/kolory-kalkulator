@@ -179,3 +179,22 @@ button { cursor: pointer; }
 .btn.is--warn { border-color: var(--warn); color: var(--warn); }
 .card__body:has(> .tbl) { overflow-x: auto; }
 .tbl th, .tbl td { padding-left: 6px; padding-right: 6px; }
+
+/* ===== Magazyn i zlecenia ===== */
+.actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+.inline { display: flex; gap: 6px; align-items: center; justify-content: flex-end; }
+.inline .f { width: 110px; }
+.tbl.is--static tr { cursor: default; }
+.tbl.is--static tbody tr:hover td { background: none; }
+.is--zero { color: var(--muted); font-weight: 400; }
+.f__hint b { font-weight: 500; color: var(--fg); }
+.list { display: grid; gap: 4px; }
+.list__item { display: flex; align-items: center; justify-content: space-between; gap: 10px; text-align: left; border: 1px solid var(--line); background: var(--panel); border-radius: 2px; padding: 10px 12px; }
+.list__item:hover { border-color: #c9c9c3; }
+.list__item.is--on { border-color: var(--fg); }
+.list__item small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.status { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--soft); white-space: nowrap; }
+.status.is--open { background: #e08a00; color: #fff; }
+.status.is--done { background: var(--on); color: var(--on-fg); }
+.status.is--off { color: var(--muted); }
+.btn[disabled] { opacity: .4; cursor: default; }

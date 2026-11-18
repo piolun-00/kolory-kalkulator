@@ -12,6 +12,8 @@ import htm from "htm";
 import { MASZYNY, CENNIK, PAPIER_FORMATY, WYCINKA } from "../engine/config.js";
 import { planuj, wariantFormatki, wloknoFormatki } from "../engine/cut.js";
 import { porownaj, wyroznione, cenaArkusza } from "../engine/pricing.js";
+import { bazaStartowa, sprawdz, stanMagazynu, stanBufora, pozycjeBufora, utworzZlecenie, przyjmijDostawe, zakonczZlecenie, anulujZlecenie, przyjmij, korekta, dodajPapier, filtruj, kluczFormatu } from "../engine/magazyn.js";
+import { PAPIERY_PRZYKLADOWE, STANY_STARTOWE, TYPY_PAPIERU } from "../engine/papiery.js";
 
 const html = htm.bind(h);
 const FORMATKI = [["sra3+", "SRA3+ 330 × 488", 330, 488], ["sra3", "SRA3 320 × 450", 320, 450], ["a3", "A3 297 × 420", 297, 420], ["inna", "Własny format", 0, 0]];
@@ -121,8 +123,37 @@ function Tech({ label, t, set, note, children }) {
   </div>`;
 }
 
+// ===== Papier z kartoteki =====
+// Wpisujesz nazwę albo wybierasz z listy (datalist); wybór z kartoteki uzupełnia gramaturę, grubość, cenę, format i włókno.
+const etykietaPapieru = (p) => `${p.nazwa} · ${Math.min(p.a, p.b)}×${Math.max(p.a, p.b)} ${p.wlokno === "dlugie" ? "LG" : "SG"}`;
+function wstawPapier(x, klucz, p) {
+  x[klucz] = { ...x[klucz], id: p.id, nazwa: p.nazwa, gram: p.gram, mikrony: p.mikrony, cenaDostawcy: p.cenaDostawcy, cenaLicze: 0 };
+  if (klucz === "papier") {
+    const f = PAPIER_FORMATY.find((q) => (q.a === p.a && q.b === p.b) || (q.a === p.b && q.b === p.a));
+    x.arkusz = { ...x.arkusz, format: f && f.id !== "inny" ? f.id : "inny", a: p.a, b: p.b, wlokno: p.wlokno };
+  }
+}
+function PapierPicker({ label, db, value, onText, onPick }) {
+  const [t, setT] = useState(value?.nazwa || "");
+  useEffect(() => setT(value?.nazwa || ""), [value?.nazwa, value?.id]);
+  const lista = db.papiery;
+  const wybrany = value?.id && lista.find((p) => p.id === value.id);
+  const onInput = (v) => {
+    setT(v);
+    const p = lista.find((q) => etykietaPapieru(q) === v || q.nazwa === v);
+    if (p) { onPick(p); setT(p.nazwa); } else onText(v);
+  };
+  const stan = wybrany ? stanMagazynu(db, wybrany.id) : null;
+  return html`<label class="f">
+    <span class="f__label">${label}</span>
+    <input type="text" list="kk-papiery" value=${t} placeholder="Wpisz nazwę albo wybierz z listy" onInput=${(e) => onInput(e.target.value)} />
+    <datalist id="kk-papiery">${lista.map((p) => html`<option value=${etykietaPapieru(p)}>${stanMagazynu(db, p.id)} ark. w magazynie</option>`)}</datalist>
+    <span class="f__hint">${wybrany ? html`Z kartoteki · ${wybrany.typ} · ${wybrany.dostawca || "—"} · <b class=${stan > 0 ? "" : "is--zero"}>magazyn wewnętrzny: ${stan} ark.</b>` : t ? "Spoza kartoteki — nie sprawdzimy magazynu. Dodaj papier w zakładce Magazyn." : "Lista pokazuje papiery z kartoteki i ich stan."}</span>
+  </label>`;
+}
+
 // ===== Formularz zlecenia =====
-function Zlecenie({ z, up, M, C }) {
+function Zlecenie({ z, up, M, C, db }) {
   const [open, setOpen] = useState(() => ({ produkt: true, drukowy: true, papier: true, druk: true, wyk: false, ...store.get("kk.groups", {}) }));
   const tg = (k) => () => { const n = { ...open, [k]: !open[k] }; setOpen(n); store.set("kk.groups", n); };
   const T = z.technologie;
@@ -194,7 +225,7 @@ function Zlecenie({ z, up, M, C }) {
       <${Seg} label="Włókno" value=${z.arkusz.wlokno} onChange=${(v) => up((x) => { x.arkusz.wlokno = v; })}
         options=${[["dlugie", "Długie (LG)"], ["krotkie", "Krótkie (SG)"]]}
         hint=${`Włókno równoległe do ${z.arkusz.wlokno === "dlugie" ? "dłuższego" : "krótszego"} boku. Papiery ozdobne B1 — najczęściej długie. Jeśli kupujesz od razu arkusz drukowy (np. SRA3+), wybierz ten sam format co w punkcie 2.`} />
-      <${Txt} label="Nazwa papieru" value=${z.papier.nazwa} placeholder="np. Materica Kraft 360 g" onChange=${(v) => up((x) => { x.papier.nazwa = v; })} />
+      <${PapierPicker} label="Papier" db=${db} value=${z.papier} onText=${(v) => up((x) => { x.papier.nazwa = v; x.papier.id = null; })} onPick=${(p) => up((x) => wstawPapier(x, "papier", p))} />
       <div class="grid3">
         <${Num} label="Gramatura" unit="g" value=${z.papier.gram} onChange=${(v) => up((x) => { x.papier.gram = v; })} />
         <${Num} label="Grubość" unit="µm" value=${z.papier.mikrony} onChange=${(v) => up((x) => { x.papier.mikrony = v; })} />
@@ -208,7 +239,7 @@ function Zlecenie({ z, up, M, C }) {
       ${T.cyfra.on && z.papier.gram > M.cyfra.gramMaxSzuflady && z.papier.gram <= M.cyfra.gramMax && html`<p class="f__hint">Powyżej ${M.cyfra.gramMaxSzuflady} g tylko bypass lub podajnik OHCF${z.papier.gram > M.cyfra.gramMaxDupleks ? `; powyżej ${M.cyfra.gramMaxDupleks} g dupleks ręczny` : ""}.</p>`}
       ${T.cyfra.on && z.papier.gram > M.cyfra.gramMax && html`<p class="f__warn">${M.cyfra.nazwa} przyjmuje maks. ${M.cyfra.gramMax} g.</p>`}
       ${T.kaszerowanie.on && html`<div class="group__sub">Papier 2 (kaszerowanie)</div>
-        <${Txt} label="Nazwa" value=${z.papier2.nazwa} placeholder="—" onChange=${(v) => up((x) => { x.papier2.nazwa = v; })} />
+        <${PapierPicker} label="Papier 2" db=${db} value=${z.papier2} onText=${(v) => up((x) => { x.papier2.nazwa = v; x.papier2.id = null; })} onPick=${(p) => up((x) => wstawPapier(x, "papier2", p))} />
         <div class="grid2">
           <${Num} label="Cena dostawcy / ark." unit="zł" value=${z.papier2.cenaDostawcy} onChange=${(v) => up((x) => { x.papier2.cenaDostawcy = v; })} />
           <${Num} label="Liczę po" unit="zł" value=${z.papier2.cenaLicze} onChange=${(v) => up((x) => { x.papier2.cenaLicze = v; })} />
@@ -388,7 +419,7 @@ function Kompromis({ s, cmp, przyjmij }) {
   </div>`;
 }
 
-function Podglad({ z, up, M, C }) {
+function Podglad({ z, up, M, C, mag }) {
   const plan = useMemo(() => planuj(z, M), [z, M]);
   const F = z.formatka;
   const wyb = useMemo(() => (F.tryb === "wybrana" ? wariantFormatki(z, M, plan, { ...F, nx: F.siatka ? F.nx : 0, ny: F.siatka ? F.ny : 0, urot: F.siatka ? F.urot : "auto" }) : null), [z, M, plan]);
@@ -445,12 +476,218 @@ function Podglad({ z, up, M, C }) {
         </div>
       </div>
 
+      <${PapierMagazyn} z=${z} s=${s} mag=${mag} />
+
       <div class="card">
         <div class="card__head"><span class="card__title">Karta cięcia</span><span class="card__sub">dla introligatorni</span></div>
         <div class="card__body"><${Karta} z=${z} plan=${plan} s=${s} M=${M} /></div>
       </div>
     </div>
   </div>`;
+}
+
+// ===== Papier i magazyn w wycenie: ile mamy, ile domówić, utworzenie zlecenia =====
+function PapierMagazyn({ z, s, mag }) {
+  const { db, setDb, otworzZlecenie } = mag;
+  const kasz = z.technologie.kaszerowanie.on;
+  const poz = [["papier", z.papier], ...(kasz ? [["papier2", z.papier2]] : [])].map(([k, p]) => {
+    const wKartotece = p.id && db.papiery.find((q) => q.id === p.id);
+    return { k, p, wKartotece, s: wKartotece ? sprawdz(db, p.id, s.arkuszy) : null };
+  });
+  const [pytaj, setPytaj] = useState(false);
+  const utworz = () => {
+    if (!pytaj) { setPytaj(true); setTimeout(() => setPytaj(false), 4000); return; }
+    const r = utworzZlecenie(db, {
+      nazwa: z.nazwa, klient: z.klient,
+      pozycje: poz.filter((x) => x.wKartotece).map((x) => ({ papierId: x.p.id, potrzeba: s.arkuszy })),
+      wycena: { netto: s.wycena.netto, brutto: s.wycena.brutto, naklad: z.naklad, uzytek: z.uzytek, formatka: { w: s.formatka.w, h: s.formatka.h, uzytkow: s.formatka.uzytkow }, arkuszy: s.arkuszy, formatek: s.formatek.zArkuszy },
+    });
+    setDb(r.db); setPytaj(false); otworzZlecenie(r.id);
+  };
+  return html`<div class="card">
+    <div class="card__head"><span class="card__title">Papier i magazyn</span><span class="card__sub">potrzeba ${s.arkuszy} ark. ${z.arkusz.a} × ${z.arkusz.b}${kasz ? " × 2 warstwy" : ""}</span></div>
+    <div class="card__body">
+      <table class="tbl is--static"><thead><tr><th>Papier</th><th>W magazynie</th><th>Potrzeba</th><th>Z magazynu</th><th>Domówić</th></tr></thead>
+        <tbody>${poz.map(({ p, wKartotece, s: c }) => html`<tr>
+          <td>${p.nazwa || "—"}<small>${wKartotece ? `${wKartotece.dostawca || ""} · ${wKartotece.typ}` : "spoza kartoteki"}</small></td>
+          <td>${c ? `${c.dostepne} ark.` : "—"}</td><td>${s.arkuszy} ark.</td>
+          <td>${c ? `${c.zMagazynu} ark.` : "—"}</td>
+          <td>${c ? html`<b class=${c.domowic > 0 ? "delta is--plus" : "delta is--minus"}>${c.domowic > 0 ? `${c.domowic} ark.` : "nic"}</b>` : html`<b>${s.arkuszy} ark.</b>`}</td>
+        </tr>`)}</tbody></table>
+      <div class="actions">
+        <button class=${`btn is--primary${pytaj ? " is--warn" : ""}`} onClick=${utworz}>${pytaj ? "Kliknij ponownie — przeniesie papier do bufora" : "Utwórz zlecenie i zarezerwuj papier"}</button>
+        <span class="note">Papier z magazynu wewnętrznego trafi do bufora zlecenia; brakujące arkusze zostaną oznaczone do domówienia.</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ===== Zlecenia =====
+const STATUSY = { "w realizacji": "w realizacji", "zakończone": "zakończone", "anulowane": "anulowane" };
+const dataPL = (iso) => (iso ? new Date(iso).toLocaleDateString("pl-PL", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
+function ZleceniaPanel({ db, sel, setSel }) {
+  const [filtr, setFiltr] = useState("w realizacji");
+  const lista = db.zlecenia.filter((x) => !filtr || x.status === filtr).slice().reverse();
+  return html`<div class="panel__inner">
+    <div><h1 class="h">Zlecenia</h1><p class="note">Zlecenie powstaje z wyceny („Utwórz zlecenie”) — papier przechodzi wtedy z magazynu wewnętrznego do bufora.</p></div>
+    <${Seg} value=${filtr} options=${[["w realizacji", "W realizacji"], ["zakończone", "Zakończone"], ["", "Wszystkie"]]} onChange=${setFiltr} />
+    ${lista.length ? html`<div class="list">${lista.map((x) => html`<button class=${`list__item${x.id === sel ? " is--on" : ""}`} onClick=${() => setSel(x.id)}>
+      <span><b>${x.numer}</b> ${x.nazwa || "bez nazwy"}<small>${x.klient || "—"} · ${dataPL(x.utworzone)}</small></span>
+      <span class=${`status is--${x.status === "w realizacji" ? "open" : x.status === "zakończone" ? "done" : "off"}`}>${x.status}</span>
+    </button>`)}</div>` : html`<p class="empty">Brak zleceń${filtr ? ` „${filtr}”` : ""}.</p>`}
+  </div>`;
+}
+function ZleceniePodglad({ db, setDb, id }) {
+  const zl_ = db.zlecenia.find((x) => x.id === id);
+  const [dost, setDost] = useState({});
+  const [zost, setZost] = useState({});
+  const [pytaj, setPytaj] = useState("");
+  useEffect(() => { setDost({}); setZost({}); setPytaj(""); }, [id]);
+  if (!zl_) return html`<div class="preview"><div class="preview__scroll"><p class="empty">Wybierz zlecenie z listy.</p></div></div>`;
+  const P = (pid) => db.papiery.find((p) => p.id === pid) || { nazwa: pid, a: 0, b: 0 };
+  const otwarte = zl_.status === "w realizacji";
+  const dwaKlik = (k, fn) => () => { if (pytaj !== k) { setPytaj(k); setTimeout(() => setPytaj(""), 4000); return; } fn(); setPytaj(""); };
+  const ruchy = db.ruchy.filter((r) => r.zlecenieId === id).slice().reverse();
+  const w = zl_.wycena;
+  return html`<div class="preview">
+    <div class="preview__bar"><b>${zl_.numer}</b><span class="preview__info">${zl_.nazwa || "bez nazwy"}${zl_.klient ? ` · ${zl_.klient}` : ""}</span>
+      <span class=${`status is--${otwarte ? "open" : zl_.status === "zakończone" ? "done" : "off"}`} style="margin-left:auto">${zl_.status}</span></div>
+    <div class="preview__scroll">
+      ${w && html`<div class="price__sum" style="margin-top:0">
+        <div class="stat is--main"><span>Netto</span><b>${zl(w.netto)}</b></div>
+        <div class="stat"><span>Nakład</span><b>${w.naklad} szt.</b></div>
+        <div class="stat"><span>Arkusz drukowy</span><b>${mm(w.formatka.w)} × ${mm(w.formatka.h)}</b></div>
+        <div class="stat"><span>Arkuszy kupowanych</span><b>${w.arkuszy}</b></div>
+      </div>`}
+      <div class="card">
+        <div class="card__head"><span class="card__title">Papier w buforze</span><span class="card__sub">osobny regał dla tego zlecenia</span></div>
+        <div class="card__body">
+          ${zl_.pozycje.length ? html`<table class="tbl is--static"><thead><tr><th>Papier</th><th>Potrzeba</th><th>Z magazynu</th><th>Domówić</th><th>Dostarczono</th><th>W buforze</th>${otwarte && html`<th>Dostawa</th>`}</tr></thead>
+            <tbody>${zl_.pozycje.map((p) => { const brak = Math.max(0, p.domowic - (p.przyjeto || 0)); return html`<tr>
+              <td>${P(p.papierId).nazwa}<small>${kluczFormatu(P(p.papierId)).replace("x", " × ")}</small></td>
+              <td>${p.potrzeba}</td><td>${p.zMagazynu}</td>
+              <td>${p.domowic ? html`<span class=${brak ? "delta is--plus" : ""}>${p.domowic}${brak ? ` (brak ${brak})` : " ✓"}</span>` : "—"}</td>
+              <td>${p.przyjeto || 0}</td><td><b>${stanBufora(db, id, p.papierId)}</b></td>
+              ${otwarte && html`<td><div class="inline"><${Num} value=${dost[p.papierId] ?? brak} onChange=${(v) => setDost({ ...dost, [p.papierId]: v })} unit="ark." />
+                <button class="btn" onClick=${() => { const n = dost[p.papierId] ?? brak; if (n > 0) { setDb(przyjmijDostawe(db, id, p.papierId, n)); setDost({ ...dost, [p.papierId]: undefined }); } }}>Przyjmij</button></div></td>`}
+            </tr>`; })}</tbody></table>` : html`<p class="note">To zlecenie nie ma papieru z kartoteki.</p>`}
+        </div>
+      </div>
+      ${otwarte && html`<div class="card">
+        <div class="card__head"><span class="card__title">Zakończenie zlecenia</span><span class="card__sub">resztki wracają do magazynu wewnętrznego</span></div>
+        <div class="card__body">
+          <div class="cfg">${zl_.pozycje.map((p) => html`<div class="cfg__row"><label>${P(p.papierId).nazwa}<small>w buforze ${stanBufora(db, id, p.papierId)} ark. — ile zostało?</small></label>
+            <${Num} unit="ark." value=${zost[p.papierId] ?? 0} onChange=${(v) => setZost({ ...zost, [p.papierId]: v })} /></div>`)}</div>
+          <div class="actions">
+            <button class=${`btn is--primary${pytaj === "koniec" ? " is--warn" : ""}`} onClick=${dwaKlik("koniec", () => setDb(zakonczZlecenie(db, id, zost)))}>${pytaj === "koniec" ? "Kliknij ponownie, aby zamknąć" : "Zakończ zlecenie"}</button>
+            <button class=${`btn${pytaj === "anuluj" ? " is--warn" : ""}`} onClick=${dwaKlik("anuluj", () => setDb(anulujZlecenie(db, id)))}>${pytaj === "anuluj" ? "Kliknij ponownie — bufor wróci do magazynu" : "Anuluj zlecenie"}</button>
+          </div>
+          <p class="note">Np. zostało +6 ark. → 6 ark. wraca do magazynu wewnętrznego, reszta bufora liczy się jako zużyta.</p>
+        </div>
+      </div>`}
+      ${!otwarte && zl_.status === "zakończone" && html`<div class="card"><div class="card__head"><span class="card__title">Rozliczenie papieru</span></div><div class="card__body">
+        <table class="tbl is--static"><thead><tr><th>Papier</th><th>Zużyto</th><th>Wróciło do magazynu</th></tr></thead>
+        <tbody>${zl_.pozycje.map((p) => html`<tr><td>${P(p.papierId).nazwa}</td><td>${p.zuzyto ?? "—"}</td><td>${p.zwrot ? `+${p.zwrot}` : "0"}</td></tr>`)}</tbody></table></div></div>`}
+      <div class="card"><div class="card__head"><span class="card__title">Historia ruchów</span></div><div class="card__body">
+        <table class="tbl is--static"><thead><tr><th>Kiedy</th><th>Ruch</th><th>Segment</th><th>Papier</th><th>Ilość</th></tr></thead>
+        <tbody>${ruchy.map((r) => html`<tr><td>${dataPL(r.data)}</td><td>${r.opis}</td><td>${r.segment === "bufor" ? "bufor" : "magazyn"}</td><td>${P(r.papierId).nazwa}</td><td class=${r.ilosc > 0 ? "delta is--minus" : "delta is--plus"}>${r.ilosc > 0 ? "+" : "−"}${Math.abs(r.ilosc)}</td></tr>`)}</tbody></table></div></div>
+    </div>
+  </div>`;
+}
+
+// ===== Magazyn =====
+function MagazynPanel({ db, setDb, f, setF, seg, setSeg, reset }) {
+  const formaty = [...new Set(db.papiery.map(kluczFormatu))].sort();
+  const kolory = [...new Set(db.papiery.map((p) => p.kolor).filter(Boolean))].sort();
+  const pusty = { nazwa: "", producent: "", dostawca: "", kolor: "", gram: 300, mikrony: 400, typ: "gładki", a: 700, b: 1000, wlokno: "dlugie", cenaDostawcy: 0, ilosc: 0 };
+  const [nowy, setNowy] = useState(pusty);
+  const [open, setOpen] = useState(false);
+  const [pytaj, setPytaj] = useState(false);
+  const setN = (k) => (v) => setNowy({ ...nowy, [k]: v });
+  const dodaj = () => {
+    if (!nowy.nazwa.trim()) return;
+    const { ilosc, ...p } = nowy;
+    let n = dodajPapier(db, p);
+    const id = n.papiery[n.papiery.length - 1].id;
+    if (ilosc > 0) n = przyjmij(n, id, ilosc, "Przyjęcie przy dodaniu do kartoteki");
+    setDb(n); setNowy(pusty); setOpen(false);
+  };
+  const typy = f.typy || [];
+  return html`<div class="panel__inner">
+    <div><h1 class="h">Magazyn papieru</h1><p class="note">Magazyn wewnętrzny — papiery z innych zleceń, zwyżki, resztki. Bufor — regał z papierem przypisanym do zleceń w realizacji.</p></div>
+    <${Seg} value=${seg} options=${[["magazyn", "Magazyn wewnętrzny"], ["bufor", "Bufor"], ["kartoteka", "Kartoteka"]]} onChange=${setSeg} />
+    <section class="group is--open"><div class="group__head"><span class="group__title">Filtry</span>
+      <button class="link" style="margin-left:auto" onClick=${() => setF({})}>Wyczyść</button></div>
+      <div class="group__body">
+        <${Txt} label="Nazwa" value=${f.szukaj || ""} placeholder="np. Keaykolour navy" onChange=${(v) => setF({ ...f, szukaj: v })} />
+        <div class="grid2">
+          <${Sel} label="Format arkusza" value=${f.format || ""} options=${[["", "Wszystkie"], ...formaty.map((x) => [x, x.replace("x", " × ")])]} onChange=${(v) => setF({ ...f, format: v })} />
+          <${Sel} label="Kolor" value=${f.kolor || ""} options=${[["", "Wszystkie"], ...kolory.map((x) => [x, x])]} onChange=${(v) => setF({ ...f, kolor: v })} />
+        </div>
+        <div class="grid2">
+          <${Num} label="Gramatura od" unit="g" value=${f.gramMin || 0} onChange=${(v) => setF({ ...f, gramMin: v })} />
+          <${Num} label="Gramatura do" unit="g" value=${f.gramMax || 0} hint="0 = bez limitu" onChange=${(v) => setF({ ...f, gramMax: v })} />
+        </div>
+        <div class="f"><span class="f__label">Typ</span><div class="chips">${TYPY_PAPIERU.map((t) => html`<button aria-pressed=${typy.includes(t)} onClick=${() => setF({ ...f, typy: typy.includes(t) ? typy.filter((x) => x !== t) : [...typy, t] })}>${t}</button>`)}</div></div>
+      </div></section>
+    <${Group} id="nowy" title="Dodaj papier do kartoteki" open=${open} toggle=${() => setOpen(!open)} summary="">
+      <${Txt} label="Nazwa" value=${nowy.nazwa} placeholder="np. Keaykolour Jet Black 300 g" onChange=${setN("nazwa")} />
+      <div class="grid3">
+        <${Txt} label="Producent" value=${nowy.producent} onChange=${setN("producent")} />
+        <${Txt} label="Dostawca" value=${nowy.dostawca} onChange=${setN("dostawca")} />
+        <${Txt} label="Kolor" value=${nowy.kolor} onChange=${setN("kolor")} />
+      </div>
+      <div class="grid3">
+        <${Num} label="Gramatura" unit="g" value=${nowy.gram} onChange=${setN("gram")} />
+        <${Num} label="Grubość" unit="µm" value=${nowy.mikrony} onChange=${setN("mikrony")} />
+        <${Sel} label="Typ" value=${nowy.typ} options=${TYPY_PAPIERU.map((t) => [t, t])} onChange=${setN("typ")} />
+      </div>
+      <div class="grid3">
+        <${Num} label="Bok A" unit="mm" value=${nowy.a} onChange=${setN("a")} />
+        <${Num} label="Bok B" unit="mm" value=${nowy.b} onChange=${setN("b")} />
+        <${Num} label="Cena / ark." unit="zł" value=${nowy.cenaDostawcy} onChange=${setN("cenaDostawcy")} />
+      </div>
+      <${Seg} label="Włókno" value=${nowy.wlokno} options=${[["dlugie", "Długie (LG)"], ["krotkie", "Krótkie (SG)"]]} onChange=${setN("wlokno")} />
+      <${Num} label="Na stanie od razu" unit="ark." value=${nowy.ilosc} onChange=${setN("ilosc")} hint="Trafi do magazynu wewnętrznego." />
+      <button class="btn is--primary" onClick=${dodaj} disabled=${!nowy.nazwa.trim()}>Dodaj do kartoteki</button>
+    </${Group}>
+    <p class="note">Dane zapisują się na razie w tej przeglądarce. <button class="link" onClick=${() => { if (!pytaj) { setPytaj(true); setTimeout(() => setPytaj(false), 4000); return; } reset(); setPytaj(false); }}>${pytaj ? "Kliknij ponownie — wszystkie stany i zlecenia wrócą do przykładu" : "Przywróć dane przykładowe"}</button></p>
+  </div>`;
+}
+function MagazynPodglad({ db, setDb, f, seg, otworzZlecenie }) {
+  const [ruch_, setRuch] = useState({});
+  const P = db.papiery;
+  if (seg === "bufor") {
+    const ok = new Set(filtruj(P, { ...f, tylkoNaStanie: false }).map((p) => p.id));
+    const rows = pozycjeBufora(db).filter((r) => ok.has(r.papierId));
+    const suma = rows.reduce((a, r) => a + r.ilosc, 0);
+    return html`<div class="preview"><div class="preview__bar"><b>Bufor</b><span class="preview__info">${rows.length} pozycji · ${suma} ark.</span></div>
+      <div class="preview__scroll"><div class="card"><div class="card__body">
+        ${rows.length ? html`<table class="tbl"><thead><tr><th>Zlecenie</th><th>Papier</th><th>Format</th><th>Gramatura</th><th>Arkuszy</th></tr></thead>
+          <tbody>${rows.map((r) => { const z_ = db.zlecenia.find((x) => x.id === r.zlecenieId) || {}; const p = P.find((x) => x.id === r.papierId) || {}; return html`<tr onClick=${() => otworzZlecenie(r.zlecenieId)}>
+            <td><b>${z_.numer}</b><small>${z_.nazwa || "—"} · ${z_.klient || "—"}</small></td><td>${p.nazwa}<small>${p.kolor || ""} · ${p.typ || ""}</small></td>
+            <td>${kluczFormatu(p).replace("x", " × ")} ${p.wlokno === "dlugie" ? "LG" : "SG"}</td><td>${p.gram} g<small>${p.mikrony} µm</small></td><td><b>${r.ilosc}</b></td></tr>`; })}</tbody></table>`
+          : html`<p class="empty">Bufor jest pusty — papier trafia tu, gdy tworzysz zlecenie z wyceny.</p>`}
+      </div></div></div></div>`;
+  }
+  // Magazyn wewnętrzny = to, co fizycznie leży na półce; Kartoteka = wszystkie papiery (tu przyjmuje się nowe)
+  const lista = filtruj(P, { ...f, tylkoNaStanie: seg === "magazyn" }, (id) => stanMagazynu(db, id));
+  const suma = lista.reduce((a, p) => a + stanMagazynu(db, p.id), 0);
+  const zapisz = (p) => { const n = ruch_[p.id]; if (!n) return; setDb(n > 0 ? przyjmij(db, p.id, n, "Przyjęcie ręczne") : korekta(db, p.id, n, "Korekta ręczna")); setRuch({ ...ruch_, [p.id]: 0 }); };
+  return html`<div class="preview"><div class="preview__bar"><b>${seg === "kartoteka" ? "Kartoteka papierów" : "Magazyn wewnętrzny"}</b><span class="preview__info">${seg === "kartoteka" ? `${lista.length} z ${P.length} papierów` : `${lista.length} papierów na stanie`} · ${suma} ark.</span></div>
+    <div class="preview__scroll"><div class="card"><div class="card__body">
+      ${lista.length ? html`<table class="tbl is--static"><thead><tr><th>Papier</th><th>Format</th><th>Gramatura</th><th>Typ</th><th>Cena / ark.</th><th>Stan</th><th>Przyjęcie / korekta</th></tr></thead>
+        <tbody>${lista.map((p) => { const st = stanMagazynu(db, p.id); return html`<tr>
+          <td>${p.nazwa}<small>${p.kolor || "—"} · ${p.producent || ""}${p.dostawca ? ` · ${p.dostawca}` : ""}</small></td>
+          <td>${kluczFormatu(p).replace("x", " × ")}<small>${p.wlokno === "dlugie" ? "długie włókno" : "krótkie włókno"}</small></td>
+          <td>${p.gram} g<small>${p.mikrony} µm</small></td><td>${p.typ}</td><td>${zl(p.cenaDostawcy)}</td>
+          <td><b class=${st > 0 ? "" : "is--zero"}>${st}</b></td>
+          <td><div class="inline"><${Num} value=${ruch_[p.id] || 0} min=${-99999} onChange=${(v) => setRuch({ ...ruch_, [p.id]: v })} unit="ark." />
+            <button class="btn" onClick=${() => zapisz(p)} title="Dodatnia liczba = przyjęcie, ujemna = korekta">Zapisz</button></div></td>
+        </tr>`; })}</tbody></table>
+        <p class="note" style="margin-top:10px">Wpisz +N, aby przyjąć arkusze (np. zwyżkę), albo −N, aby skorygować stan po inwentaryzacji. Każdy ruch zostaje w historii.</p>`
+        : html`<p class="empty">${seg === "magazyn" ? "Nic na stanie dla tych filtrów. Przyjęcia robisz w zakładce Kartoteka." : "Brak papierów dla tych filtrów."}</p>`}
+    </div></div></div></div>`;
 }
 
 // ===== Ustawienia: Maszyny i Cenniki =====
@@ -509,6 +746,14 @@ function App() {
   const [M, setMRaw] = useState(() => merge(clone(MASZYNY), store.get("kk.maszyny", null)));
   const [C, setCRaw] = useState(() => merge(clone(CENNIK), store.get("kk.cennik", null)));
   const [newVersion, setNewVersion] = useState(false);
+  // Magazyn: kartoteka papierów, ruchy i zlecenia — na razie w tej przeglądarce (wspólna baza w kolejnym etapie)
+  const [db, setDbRaw] = useState(() => store.get("kk.magazyn", null) || bazaStartowa(PAPIERY_PRZYKLADOWE, STANY_STARTOWE));
+  const setDb = (n) => { setDbRaw(n); store.set("kk.magazyn", n); };
+  const [selZl, setSelZl] = useState(null);
+  const [magF, setMagF] = useState({});
+  const [magSeg, setMagSeg] = useState("magazyn");
+  const otworzZlecenie = (id) => { setSelZl(id); setView("zlecenia"); };
+  const aktywne = db.zlecenia.filter((x) => x.status === "w realizacji").length;
   const up = (fn) => setZ((prev) => { const n = clone(prev); fn(n); store.set("kk.zlecenie", n); return n; });
   const setM = (fn) => setMRaw((prev) => { const n = clone(prev); fn(n); store.set("kk.maszyny", n); return n; });
   const setC = (fn) => setCRaw((prev) => { const n = clone(prev); fn(n); store.set("kk.cennik", n); return n; });
@@ -533,18 +778,24 @@ function App() {
     </header>
     <nav class="nav">
       <button class=${view === "wycena" ? "is--on" : ""} onClick=${() => setView("wycena")}>Wycena</button>
+      <button class=${view === "zlecenia" ? "is--on" : ""} onClick=${() => setView("zlecenia")}>Zlecenia <small>${aktywne || ""}</small></button>
+      <button class=${view === "magazyn" ? "is--on" : ""} onClick=${() => setView("magazyn")}>Magazyn papieru</button>
       <span class="nav__label">Ustawienia</span>
       <button class=${view === "maszyny" ? "is--on" : ""} onClick=${() => setView("maszyny")}>Maszyny <small>${Object.keys(M).length}</small></button>
       <button class=${view === "cenniki" ? "is--on" : ""} onClick=${() => setView("cenniki")}>Cenniki</button>
       <span class="nav__label">Wkrótce</span>
-      <p class="nav__note">Zlecenia i karta produkcyjna · Broszury · Wielki format · Offset</p>
+      <p class="nav__note">Karta produkcyjna · Broszury · Wielki format · Offset · wspólna baza dla zespołu</p>
     </nav>
     <main class="panel">
-      ${view === "wycena" && html`<${Zlecenie} z=${z} up=${up} M=${M} C=${C} />`}
+      ${view === "wycena" && html`<${Zlecenie} z=${z} up=${up} M=${M} C=${C} db=${db} />`}
       ${view === "maszyny" && html`<${Maszyny} M=${M} setM=${setM} reset=${() => { setMRaw(clone(MASZYNY)); store.set("kk.maszyny", null); }} />`}
       ${view === "cenniki" && html`<${Cenniki} C=${C} setC=${setC} reset=${() => { setCRaw(clone(CENNIK)); store.set("kk.cennik", null); }} />`}
+      ${view === "zlecenia" && html`<${ZleceniaPanel} db=${db} sel=${selZl} setSel=${setSelZl} />`}
+      ${view === "magazyn" && html`<${MagazynPanel} db=${db} setDb=${setDb} f=${magF} setF=${setMagF} seg=${magSeg} setSeg=${setMagSeg} reset=${() => setDb(bazaStartowa(PAPIERY_PRZYKLADOWE, STANY_STARTOWE))} />`}
     </main>
-    <${Podglad} z=${z} up=${up} M=${M} C=${C} />
+    ${view === "zlecenia" ? html`<${ZleceniePodglad} db=${db} setDb=${setDb} id=${selZl} />`
+      : view === "magazyn" ? html`<${MagazynPodglad} db=${db} setDb=${setDb} f=${magF} seg=${magSeg} otworzZlecenie=${otworzZlecenie} />`
+      : html`<${Podglad} z=${z} up=${up} M=${M} C=${C} mag=${{ db, setDb, otworzZlecenie }} />`}
   </div>`;
 }
 
