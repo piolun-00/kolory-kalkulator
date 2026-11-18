@@ -75,6 +75,8 @@ const zl = (v) => `${fmtZl.format(v || 0)} zł`;
 const mm = (v) => `${String(Math.round(v * 10) / 10).replace(".", ",")}`;
 const pct = (v) => `${Math.round(v * 100)}%`;
 const num = (s) => { const n = parseFloat(String(s).replace(",", ".").replace(/\s/g, "")); return Number.isFinite(n) ? n : null; };
+// Grubość: zapis zawsze w µm; wyświetlanie — tektury i grube materiały (od 1 mm) w mm, papiery w µm
+const grub = (um) => (!um ? "—" : um >= 1000 ? `${String(Math.round(um) / 1000).replace(".", ",")} mm` : `${Math.round(um)} µm`);
 const signed = (v, unit = "", fmt = (x) => x) => (v > 0 ? `+${fmt(v)}${unit}` : v < 0 ? `−${fmt(-v)}${unit}` : `0${unit}`);
 
 // ===== Pola formularza =====
@@ -89,6 +91,15 @@ function Num({ label, value, onChange, unit, hint, step, min = 0 }) {
     <span class=${unit ? "f__unit" : ""}><input type="text" inputmode="decimal" value=${t} onInput=${(e) => commit(e.target.value)} step=${step} />${unit && html`<span>${unit}</span>`}</span>
     ${hint && html`<span class="f__hint">${hint}</span>`}
   </label>`;
+}
+// Pole grubości z przełącznikiem jednostki µm / mm (wartość zapisywana w µm)
+function Grubosc({ label = "Grubość", value, onChange }) {
+  const [jedn, setJedn] = useState(value >= 1000 ? "mm" : "µm");
+  const pokaz = jedn === "mm" ? Math.round(value) / 1000 : value;
+  return html`<div class="f">
+    <span class="f__label f__label--row">${label}<span class="unitseg">${["µm", "mm"].map((u) => html`<button type="button" aria-pressed=${jedn === u} onClick=${() => setJedn(u)}>${u}</button>`)}</span></span>
+    <${Num} unit=${jedn} value=${pokaz} onChange=${(v) => onChange(jedn === "mm" ? Math.round(v * 1000) : v)} />
+  </div>`;
 }
 function Txt({ label, value, onChange, placeholder }) {
   return html`<label class="f"><span class="f__label">${label}</span><input type="text" value=${value} placeholder=${placeholder} onInput=${(e) => onChange(e.target.value)} /></label>`;
@@ -228,7 +239,7 @@ function Zlecenie({ z, up, M, C, db }) {
       <${PapierPicker} label="Papier" db=${db} value=${z.papier} onText=${(v) => up((x) => { x.papier.nazwa = v; x.papier.id = null; })} onPick=${(p) => up((x) => wstawPapier(x, "papier", p))} />
       <div class="grid3">
         <${Num} label="Gramatura" unit="g" value=${z.papier.gram} onChange=${(v) => up((x) => { x.papier.gram = v; })} />
-        <${Num} label="Grubość" unit="µm" value=${z.papier.mikrony} onChange=${(v) => up((x) => { x.papier.mikrony = v; })} />
+        <${Grubosc} value=${z.papier.mikrony} onChange=${(v) => up((x) => { x.papier.mikrony = v; })} />
         <${Num} label="Zwyżka" unit="ark." value=${z.zwyzkaArkuszy} onChange=${(v) => up((x) => { x.zwyzkaArkuszy = Math.round(v); })} />
       </div>
       <div class="grid2">
@@ -651,6 +662,10 @@ function MagazynPanel({ db, setDb, f, setF, seg, setSeg, reset }) {
           <${Sel} label="Kolor" value=${f.kolor || ""} options=${[["", "Wszystkie"], ...kolory.map((x) => [x, x])]} onChange=${(v) => setF({ ...f, kolor: v })} />
         </div>
         <div class="grid2">
+          <${Num} label="Grubość od" unit="mm" value=${f.grubMin || 0} onChange=${(v) => setF({ ...f, grubMin: v })} />
+          <${Num} label="Grubość do" unit="mm" value=${f.grubMax || 0} hint="np. 0,4 · 0 = bez limitu" onChange=${(v) => setF({ ...f, grubMax: v })} />
+        </div>
+        <div class="grid2">
           <${Num} label="Gramatura od" unit="g" value=${f.gramMin || 0} onChange=${(v) => setF({ ...f, gramMin: v })} />
           <${Num} label="Gramatura do" unit="g" value=${f.gramMax || 0} hint="0 = bez limitu" onChange=${(v) => setF({ ...f, gramMax: v })} />
         </div>
@@ -667,7 +682,7 @@ function MagazynPanel({ db, setDb, f, setF, seg, setSeg, reset }) {
       </div>
       <div class="grid3">
         <${Num} label="Gramatura" unit="g" value=${nowy.gram} onChange=${setN("gram")} />
-        <${Num} label="Grubość" unit="µm" value=${nowy.mikrony} onChange=${setN("mikrony")} />
+        <${Grubosc} value=${nowy.mikrony} onChange=${setN("mikrony")} />
         <${Sel} label="Typ" value=${nowy.typ} options=${TYPY_PAPIERU.map((t) => [t, t])} onChange=${setN("typ")} />
       </div>
       <div class="grid3">
@@ -696,7 +711,7 @@ function MagazynPodglad({ db, setDb, f, seg, otworzZlecenie }) {
         ${rows.length ? html`<table class="tbl is--static"><thead><tr><th>Zlecenie</th><th class="l">Papier</th><th>Z magazynu</th><th>Domówić</th><th>U kogo</th><th>Status</th><th>W buforze</th><th></th></tr></thead>
           <tbody>${rows.map(({ zlecenie: z_, poz, status, wBuforze }) => { const p = P.find((x) => x.id === poz.papierId) || {}; return html`<tr>
             <td><button class="link" onClick=${() => otworzZlecenie(z_.id)}><b>${z_.numer}</b></button><small>${z_.nazwa || "—"} · ${z_.klient || "—"}</small></td>
-            <td class="l">${p.nazwa}<small>${kluczFormatu(p).replace("x", " × ")} ${p.wlokno === "dlugie" ? "LG" : "SG"} · ${p.mikrony} µm</small></td>
+            <td class="l">${p.nazwa}<small>${kluczFormatu(p).replace("x", " × ")} ${p.wlokno === "dlugie" ? "LG" : "SG"} · ${grub(p.mikrony)}</small></td>
             <td>${poz.zMagazynu}</td>
             <td>${poz.domowic ? html`${poz.domowic}${poz.przyjeto ? html`<small>dostarczono ${poz.przyjeto}</small>` : ""}` : "—"}</td>
             <td>${poz.domowic ? html`<${Dostawca} db=${db} setDb=${setDb} zlecenieId=${z_.id} poz=${poz} edytuj=${status !== "gotowy"} />` : "—"}</td>
@@ -717,7 +732,7 @@ function MagazynPodglad({ db, setDb, f, seg, otworzZlecenie }) {
         <tbody>${lista.map((p) => { const stn = stanMagazynu(db, p.id); return html`<tr class=${stn > 0 ? "" : "is--zero"}>
           <td>${p.nazwa}<small>${p.kolor || "—"} · ${p.producent || ""}</small></td>
           <td>${kluczFormatu(p).replace("x", " × ")}<small>${p.wlokno === "dlugie" ? "długie włókno" : "krótkie włókno"}</small></td>
-          <td>${p.gram} g<small>${p.mikrony} µm</small></td><td>${p.typ}</td><td>${p.dostawca || "—"}</td><td>${zl(p.cenaDostawcy)}</td>
+          <td>${p.gram} g<small>${grub(p.mikrony)}</small></td><td>${p.typ}</td><td>${p.dostawca || "—"}</td><td>${zl(p.cenaDostawcy)}</td>
           <td><b>${stn}</b></td>
           <td><div class="inline"><${Num} value=${ruch_[p.id] || 0} min=${-99999} onChange=${(v) => setRuch({ ...ruch_, [p.id]: v })} unit="ark." />
             <button class="btn" onClick=${() => zapisz(p)} title="Dodatnia liczba = przyjęcie, ujemna = korekta">Zapisz</button></div></td>

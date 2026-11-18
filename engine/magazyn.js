@@ -178,7 +178,7 @@ export function listaBufora(db) {
 }
 
 // ===== Filtry kartoteki / magazynu =====
-// f = { szukaj, format: "700x1000" | "", kolor, gramMin, gramMax, typy: [] , tylkoNaStanie }
+// f = { szukaj, format: "700x1000" | "", kolor, gramMin, gramMax, grubMin, grubMax (mm), typy: [], tylkoNaStanie }
 export const kluczFormatu = (p) => `${Math.min(p.a, p.b)}x${Math.max(p.a, p.b)}`;
 export function filtruj(papiery, f = {}, stanFn = null) {
   const q = (f.szukaj || "").trim().toLowerCase();
@@ -188,6 +188,8 @@ export function filtruj(papiery, f = {}, stanFn = null) {
     (!f.kolor || p.kolor === f.kolor) &&
     (!f.gramMin || p.gram >= f.gramMin) &&
     (!f.gramMax || p.gram <= f.gramMax) &&
+    (!f.grubMin || (p.mikrony || 0) >= f.grubMin * 1000) &&   // grubość w filtrze podawana w mm
+    (!f.grubMax || (p.mikrony || 0) <= f.grubMax * 1000) &&
     (!f.typy?.length || f.typy.includes(p.typ)) &&
     (!f.tylkoNaStanie || !stanFn || stanFn(p.id) > 0));
 }

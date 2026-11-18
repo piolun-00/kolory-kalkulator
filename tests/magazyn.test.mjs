@@ -60,6 +60,8 @@ test("Filtry: nazwa, format, kolor, gramatura, typ, tylko na stanie", () => {
   assert.equal(filtruj(P, { kolor: "Jet Black" }).length, 2);
   assert.equal(filtruj(P, { gramMin: 300, gramMax: 300 }).length, 9);
   assert.equal(filtruj(P, { typy: ["gładki"] }).length, 2);
+  assert.equal(filtruj(P, { grubMin: 0.6 }).length, 1);            // tylko Navy Blue 450 g = 0,65 mm
+  assert.equal(filtruj(P, { grubMax: 0.25 }).length, 3);           // 120 g (×2) i Parchment 170 g
   assert.equal(filtruj(P, { tylkoNaStanie: true }, (id) => stanMagazynu(db, id)).length, 6);
 });
 

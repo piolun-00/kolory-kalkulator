@@ -24,7 +24,8 @@ UI i komentarze po polsku. Styl i tokeny 1:1 z edytora brandmanuala (piolun-00/b
   Zlecenie z wyceny: papier z magazynu → bufor, brak → „domówić”; dostawa → bufor; zakończenie: „zostało +N” → magazyn,
   reszta bufora = zużycie. Każda pozycja bufora: z magazynu / domówić / u kogo (dostawca) / status
   do zamówienia → zamówiony → gotowy (z magazynu w całości = od razu gotowy). Magazyn wewnętrzny = kartoteka ze stanem
-  (zera wyszarzone, filtr „ukryj bez stanu”). Kartoteka przykładowa: Keaykolour (marka Antalis, nie Europapier) — ceny przykładowe.
+  (zera wyszarzone, filtr „ukryj bez stanu”). Grubość zawsze zapisywana w µm; pola mają przełącznik µm/mm,
+  wyświetlanie od 1 mm w mm (tektury); filtr grubości w mm. Kartoteka przykładowa: Keaykolour (marka Antalis, nie Europapier) — ceny przykładowe.
 - Dane: localStorage (`kk.zlecenie`, `kk.maszyny`, `kk.cennik`, `kk.magazyn`). Magazyn MUSI trafić do wspólnej bazy
   (inaczej każdy pracownik ma swój stan) — to najbliższy etap.
 - Pasek nowej wersji jak w brandmanualu (`version.json`, tylko gdy wersja na serwerze nowsza).

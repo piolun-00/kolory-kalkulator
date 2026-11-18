@@ -212,3 +212,8 @@ input.mini:focus { outline: 2px solid var(--fg); outline-offset: -1px; }
 .tbl tr.is--zero td .btn, .tbl tr.is--zero td input { color: var(--fg); }
 .tbl th.l, .tbl td.l { text-align: left; }
 .inline .f { width: 84px; }
+/* Przełącznik jednostki przy etykiecie pola (grubość µm / mm) */
+.f__label--row { display: flex; justify-content: space-between; align-items: center; overflow: visible; }
+.unitseg { display: inline-flex; gap: 2px; }
+.unitseg button { border: 0; background: var(--soft); color: var(--muted); padding: 1px 6px; border-radius: 2px; font-size: 11px; line-height: 1.4; }
+.unitseg button[aria-pressed=true] { background: var(--on); color: var(--on-fg); }
