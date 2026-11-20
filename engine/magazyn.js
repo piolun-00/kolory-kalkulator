@@ -126,10 +126,29 @@ export function przyjmijDostawe(db, zlecenieId, papierId, ilosc) {
   const p = z.pozycje.find((x) => x.papierId === papierId);
   if (p) {
     p.przyjeto = (p.przyjeto || 0) + Math.round(ilosc);
+    p.dostawy = [...(p.dostawy || []), { ilosc: Math.round(ilosc), data: teraz() }]; // lista dostaw — żeby dało się cofnąć ostatnią
     if (p.przyjeto >= (p.domowic || 0)) { p.status = "gotowy"; p.dostarczono = teraz(); }
     else if (statusPozycji(p) === "do zamówienia") { p.status = "zamówiony"; p.zamowiono = p.zamowiono || teraz(); }
   }
   ruch(n, { segment: "bufor", papierId, ilosc: Math.round(ilosc), typ: "dostawa", zlecenieId, opis: `Dostawa — ${z.numer}` });
+  return n;
+}
+
+// Cofnięcie ostatniej dostawy (pomyłka przy kliknięciu „Dostarczono”). Nie kasujemy historii — dopisujemy ruch odwrotny.
+export function cofnijDostawe(db, zlecenieId, papierId) {
+  const n = kopia(db);
+  const z = n.zlecenia.find((x) => x.id === zlecenieId);
+  const p = z?.pozycje.find((x) => x.papierId === papierId);
+  if (!z || z.status !== "w realizacji" || !p || !(p.przyjeto > 0)) return n;
+  const dost = [...(p.dostawy || [])];
+  const ost = dost.pop();
+  const ilosc = Math.min(ost ? ost.ilosc : p.przyjeto, stanBufora(n, zlecenieId, papierId));
+  if (ilosc > 0) ruch(n, { segment: "bufor", papierId, ilosc: -ilosc, typ: "cofniecie", zlecenieId, opis: `Cofnięcie dostawy — ${z.numer}` });
+  p.dostawy = dost;
+  p.przyjeto = Math.max(0, p.przyjeto - ilosc);
+  p.dostarczono = null;
+  p.status = "zamówiony";                         // dostawa była po zamówieniu — wracamy do „zamówiony”
+  p.zamowiono = p.zamowiono || teraz();
   return n;
 }
 

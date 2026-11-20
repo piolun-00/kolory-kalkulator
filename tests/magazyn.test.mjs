@@ -1,7 +1,7 @@
 // Testy magazynu: przepływ magazyn wewnętrzny → bufor zlecenia → zwrot resztek.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { edytujPapier, oznaczZamowione, cofnijZamowienie, ustawDostawce, listaBufora, statusPozycji, bazaStartowa, sprawdz, stanMagazynu, stanBufora, utworzZlecenie, przyjmijDostawe, zakonczZlecenie, anulujZlecenie, korekta, filtruj, pozycjeBufora } from "../engine/magazyn.js";
+import { cofnijDostawe, edytujPapier, oznaczZamowione, cofnijZamowienie, ustawDostawce, listaBufora, statusPozycji, bazaStartowa, sprawdz, stanMagazynu, stanBufora, utworzZlecenie, przyjmijDostawe, zakonczZlecenie, anulujZlecenie, korekta, filtruj, pozycjeBufora } from "../engine/magazyn.js";
 import { PAPIERY_PRZYKLADOWE, STANY_STARTOWE } from "../engine/papiery.js";
 
 const start = () => bazaStartowa(PAPIERY_PRZYKLADOWE, STANY_STARTOWE);
@@ -97,4 +97,24 @@ test("Edycja papieru w kartotece nie zmienia stanu ani historii", () => {
   assert.equal(p.nazwa, "Keaykolour Jet Black 300 g");
   assert.equal(stanMagazynu(db, JB), 42);
   assert.equal(db.ruchy.length, db0.ruchy.length);
+});
+
+test("Cofnięcie dostawy: gotowy → zamówiony, bufor pomniejszony, historia zostaje", () => {
+  let { db, id } = utworzZlecenie(start(), { pozycje: [{ papierId: JB, potrzeba: 50 }] });
+  db = oznaczZamowione(db, id, JB);
+  db = przyjmijDostawe(db, id, JB, 5);
+  db = przyjmijDostawe(db, id, JB, 3);
+  assert.equal(statusPozycji(db.zlecenia[0].pozycje[0]), "gotowy");
+  const ruchow = db.ruchy.length;
+  db = cofnijDostawe(db, id, JB);                      // cofa tylko ostatnią (3)
+  const p = db.zlecenia[0].pozycje[0];
+  assert.equal(statusPozycji(p), "zamówiony");
+  assert.equal(p.przyjeto, 5);
+  assert.equal(stanBufora(db, id, JB), 47);
+  assert.equal(db.ruchy.length, ruchow + 1);
+  db = cofnijDostawe(db, id, JB);                      // i następną (5)
+  assert.equal(db.zlecenia[0].pozycje[0].przyjeto, 0);
+  assert.equal(stanBufora(db, id, JB), 42);
+  db = cofnijZamowienie(db, id, JB);
+  assert.equal(statusPozycji(db.zlecenia[0].pozycje[0]), "do zamówienia");
 });

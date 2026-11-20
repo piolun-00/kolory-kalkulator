@@ -12,7 +12,7 @@ import htm from "htm";
 import { MASZYNY, CENNIK, PAPIER_FORMATY, WYCINKA } from "../engine/config.js";
 import { planuj, wariantFormatki, wloknoFormatki } from "../engine/cut.js";
 import { porownaj, wyroznione, cenaArkusza } from "../engine/pricing.js";
-import { bazaStartowa, sprawdz, stanMagazynu, stanBufora, pozycjeBufora, utworzZlecenie, przyjmijDostawe, zakonczZlecenie, anulujZlecenie, przyjmij, korekta, dodajPapier, edytujPapier, filtruj, kluczFormatu, listaBufora, statusPozycji, oznaczZamowione, cofnijZamowienie, ustawDostawce, STATUSY_BUFORA } from "../engine/magazyn.js";
+import { bazaStartowa, sprawdz, stanMagazynu, stanBufora, pozycjeBufora, utworzZlecenie, przyjmijDostawe, zakonczZlecenie, anulujZlecenie, przyjmij, korekta, dodajPapier, edytujPapier, filtruj, kluczFormatu, listaBufora, statusPozycji, oznaczZamowione, cofnijZamowienie, ustawDostawce, cofnijDostawe, STATUSY_BUFORA } from "../engine/magazyn.js";
 import { PAPIERY_PRZYKLADOWE, STANY_STARTOWE, TYPY_PAPIERU } from "../engine/papiery.js";
 
 const html = htm.bind(h);
@@ -570,11 +570,14 @@ function AkcjaPozycji({ db, setDb, zlecenieId, poz }) {
   const brak = Math.max(0, (poz.domowic || 0) - (poz.przyjeto || 0));
   const [n, setN] = useState(brak);
   useEffect(() => setN(brak), [brak]);
-  if (st === "do zamówienia") return html`<button class="btn" onClick=${() => setDb(oznaczZamowione(db, zlecenieId, poz.papierId))}>Zamówiono</button>`;
-  if (st === "zamówiony") return html`<div class="inline"><${Num} value=${n} onChange=${setN} unit="ark." />
+  // Każdy krok da się cofnąć: zamówiony → do zamówienia, dostarczony → zamówiony (ostatnia dostawa)
+  const cofnijDost = poz.przyjeto > 0 && html`<button class="btn is--ghost" title="Cofnij ostatnią dostawę" onClick=${() => setDb(cofnijDostawe(db, zlecenieId, poz.papierId))}>↶ Cofnij dostawę</button>`;
+  if (st === "do zamówienia") return html`<div class="inline is--wrap"><span class="note">Następny krok:</span><button class="btn" onClick=${() => setDb(oznaczZamowione(db, zlecenieId, poz.papierId))}>Zamówiono ${brak} ark.${poz.dostawca ? ` u ${poz.dostawca}` : ""}</button></div>`;
+  if (st === "zamówiony") return html`<div class="inline is--wrap"><span class="note">Dostawa:</span><${Num} value=${n} onChange=${setN} unit="ark." />
     <button class="btn" onClick=${() => n > 0 && setDb(przyjmijDostawe(db, zlecenieId, poz.papierId, n))}>Dostarczono</button>
-    <button class="link" title="Cofnij do „do zamówienia”" onClick=${() => setDb(cofnijZamowienie(db, zlecenieId, poz.papierId))}>cofnij</button></div>`;
-  return html`<span class="note">—</span>`;
+    ${poz.przyjeto > 0 ? cofnijDost : html`<button class="btn is--ghost" title="Wróć do „do zamówienia”" onClick=${() => setDb(cofnijZamowienie(db, zlecenieId, poz.papierId))}>↶ Cofnij</button>`}</div>`;
+  if (cofnijDost) return html`<div class="inline is--wrap"><span class="note">Dostarczono komplet${poz.dostarczono ? ` · ${dataPL(poz.dostarczono)}` : ""}.</span>${cofnijDost}</div>`;
+  return html`<span class="note">Całość z magazynu wewnętrznego — gotowe.</span>`;
 }
 
 // ===== Zlecenia =====
@@ -616,16 +619,16 @@ function ZleceniePodglad({ db, setDb, id }) {
       <div class="card">
         <div class="card__head"><span class="card__title">Papier w buforze</span><span class="card__sub">osobny regał dla tego zlecenia</span></div>
         <div class="card__body">
-          ${zl_.pozycje.length ? html`<table class="tbl is--static"><thead><tr><th>Papier</th><th>Potrzeba</th><th>Z magazynu</th><th>Domówić</th><th>U kogo</th><th>Status</th><th>W buforze</th>${otwarte && html`<th></th>`}</tr></thead>
-            <tbody>${zl_.pozycje.map((p) => html`<tr>
+          ${zl_.pozycje.length ? html`<table class="tbl is--static"><thead><tr><th>Papier</th><th>Potrzeba</th><th>Z magazynu</th><th>Domówić</th><th>U kogo</th><th>Status</th><th>W buforze</th></tr></thead>
+            <tbody>${zl_.pozycje.map((p) => html`<tr class=${otwarte ? "has--sub" : ""}>
               <td>${P(p.papierId).nazwa}<small>${kluczFormatu(P(p.papierId)).replace("x", " × ")}</small></td>
               <td>${p.potrzeba}</td><td>${p.zMagazynu}</td>
               <td>${p.domowic ? html`${p.domowic}${p.przyjeto ? html`<small>dostarczono ${p.przyjeto}</small>` : ""}` : "—"}</td>
               <td>${p.domowic ? html`<${Dostawca} db=${db} setDb=${setDb} zlecenieId=${id} poz=${p} edytuj=${otwarte && statusPozycji(p) !== "gotowy"} />` : "—"}</td>
               <td><${Status} st=${statusPozycji(p)} poz=${p} /></td>
               <td><b>${stanBufora(db, id, p.papierId)}</b></td>
-              ${otwarte && html`<td><${AkcjaPozycji} db=${db} setDb=${setDb} zlecenieId=${id} poz=${p} /></td>`}
-            </tr>`)}</tbody></table>` : html`<p class="note">To zlecenie nie ma papieru z kartoteki.</p>`}
+            </tr>
+            ${otwarte && html`<tr class="sub"><td colspan="7"><${AkcjaPozycji} db=${db} setDb=${setDb} zlecenieId=${id} poz=${p} /></td></tr>`}`)}</tbody></table>` : html`<p class="note">To zlecenie nie ma papieru z kartoteki.</p>`}
         </div>
       </div>
       ${otwarte && html`<div class="card">
@@ -742,16 +745,16 @@ function MagazynPodglad({ db, setDb, f, seg, otworzZlecenie, edytuj, setEdytuj }
     return html`<div class="preview"><div class="preview__bar"><b>Bufor</b>
         <span class="preview__info">${STATUSY_BUFORA.map((s_) => `${s_}: ${ile(s_)}`).join(" · ")}</span></div>
       <div class="preview__scroll"><div class="card"><div class="card__body">
-        ${rows.length ? html`<table class="tbl is--static"><thead><tr><th>Zlecenie</th><th class="l">Papier</th><th>Z magazynu</th><th>Domówić</th><th>U kogo</th><th>Status</th><th>W buforze</th><th></th></tr></thead>
-          <tbody>${rows.map(({ zlecenie: z_, poz, status, wBuforze }) => { const p = P.find((x) => x.id === poz.papierId) || {}; return html`<tr>
+        ${rows.length ? html`<table class="tbl is--static"><thead><tr><th>Zlecenie</th><th class="l">Papier</th><th>Z magazynu</th><th>Domówić</th><th>U kogo</th><th>Status</th><th>W buforze</th></tr></thead>
+          <tbody>${rows.map(({ zlecenie: z_, poz, status, wBuforze }) => { const p = P.find((x) => x.id === poz.papierId) || {}; return html`<tr class="has--sub">
             <td><button class="link" onClick=${() => otworzZlecenie(z_.id)}><b>${z_.numer}</b></button><small>${z_.nazwa || "—"} · ${z_.klient || "—"}</small></td>
             <td class="l">${p.nazwa}<small>${kluczFormatu(p).replace("x", " × ")} ${p.wlokno === "dlugie" ? "LG" : "SG"} · ${grub(p.mikrony)}</small></td>
             <td>${poz.zMagazynu}</td>
             <td>${poz.domowic ? html`${poz.domowic}${poz.przyjeto ? html`<small>dostarczono ${poz.przyjeto}</small>` : ""}` : "—"}</td>
             <td>${poz.domowic ? html`<${Dostawca} db=${db} setDb=${setDb} zlecenieId=${z_.id} poz=${poz} edytuj=${status !== "gotowy"} />` : "—"}</td>
             <td><${Status} st=${status} poz=${poz} /></td>
-            <td><b>${wBuforze}</b></td>
-            <td><${AkcjaPozycji} db=${db} setDb=${setDb} zlecenieId=${z_.id} poz=${poz} /></td></tr>`; })}</tbody></table>`
+            <td><b>${wBuforze}</b></td></tr>
+            <tr class="sub"><td colspan="7"><${AkcjaPozycji} db=${db} setDb=${setDb} zlecenieId=${z_.id} poz=${poz} /></td></tr>`; })}</tbody></table>`
           : html`<p class="empty">${st.length ? "Brak pozycji o tym statusie." : "Bufor jest pusty — wpisy powstają, gdy tworzysz zlecenie z wyceny."}</p>`}
       </div></div></div></div>`;
   }

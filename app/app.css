@@ -225,3 +225,11 @@ input.mini:focus { outline: 2px solid var(--fg); outline-offset: -1px; }
 .ro.is--one { grid-template-columns: 1fr; }
 .link.is--name { color: var(--fg); text-decoration-color: #c9c9c3; text-align: left; }
 .tbl tr.is--zero td .link.is--name { color: #a9a9a2; }
+.inline.is--wrap { flex-wrap: wrap; }
+.btn.is--ghost { border-color: transparent; background: transparent; color: var(--muted); padding: 6px 8px; }
+.btn.is--ghost:hover { color: var(--fg); border-color: var(--line); }
+/* Akcje pozycji bufora w osobnym wierszu — tabela mieści się na laptopie */
+.tbl tr.has--sub td { border-bottom: 0; padding-bottom: 4px; }
+.tbl tr.sub td { text-align: right; padding-top: 0; padding-bottom: 10px; }
+.tbl tr.sub .inline { justify-content: flex-end; }
+input.mini { width: 110px; }
